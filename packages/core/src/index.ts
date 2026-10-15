@@ -18,3 +18,5 @@ export * from "./tools/git.js";
 export * from "./tools/lint.js";
 export * from "./agents/scout.js";
 export * from "./agents/planner.js";
+export * from "./sandbox/sandbox.js";
+export * from "./sandbox/tests.js";
