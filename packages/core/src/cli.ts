@@ -6,6 +6,14 @@ import { loadConfig } from "./config.js";
 import { recommendDependency, runThemis } from "./orchestrator.js";
 import type { RunOutcome } from "./orchestrator.js";
 import { hasJson, loadRun, readJson } from "./run/context.js";
+import {
+  stageCapsule,
+  stageJudge,
+  stageMigrate,
+  stagePlan,
+  stageScout,
+  stageVerifySide,
+} from "./agent-stages.js";
 import { stepBranch, stepCommit, stepMap, stepPlan, stepTests, stepVerify } from "./steps.js";
 import { Findings, MigrationPlan, MigrationResult, Verification } from "./schema/stages.js";
 import type { DependencyFinding } from "./schema/stages.js";
@@ -252,6 +260,74 @@ step
       summary: out.capsule.summary,
       capsule: `${resolve(runDir)}/capsule.md`,
     });
+  });
+
+// Agent stages: one agent per invocation, resuming from the run directory (used by the CI runner's per-agent jobs).
+const stage = program
+  .command("stage")
+  .description("run one agent against a run directory (the CI runner runs each agent as its own job)");
+
+stage
+  .command("scout")
+  .argument("[package]", "dependency to migrate (default: Themis recommends one)")
+  .description("Argus: detect the toolchain and rank dependencies; creates the run directory")
+  .action(async (pkg?: string) => {
+    const { repoPath } = common();
+    const ctx = await stageScout(repoPath, pkg);
+    printJson({ runDir: ctx.runDir });
+  });
+
+stage
+  .command("plan")
+  .argument("<runDir>")
+  .description("Athena: map usage and write the migration plan")
+  .action(async (runDir: string) => {
+    const plan = await stagePlan(runDir);
+    printJson({
+      dependency: plan.dependency,
+      strategy: plan.strategy,
+      target: plan.target,
+      feasible: plan.feasible,
+    });
+  });
+
+stage
+  .command("migrate")
+  .argument("<runDir>")
+  .description("Hephaestus: create or retry the themis/* branch")
+  .action(async (runDir: string) => {
+    const m = await stageMigrate(runDir);
+    printJson({ branch: m.branch, attempt: m.attempt, commits: m.commits.length });
+  });
+
+stage
+  .command("verify")
+  .argument("<runDir>")
+  .requiredOption("--side <side>", "baseline or candidate")
+  .description("Minos: build one side in its sandbox and run the shared checks")
+  .action(async (runDir: string, o: { side: string }) => {
+    if (o.side !== "baseline" && o.side !== "candidate")
+      throw new Error("--side must be baseline or candidate");
+    await stageVerifySide(runDir, o.side);
+  });
+
+stage
+  .command("judge")
+  .argument("<runDir>")
+  .description("Minos: compare both sides and decide the veto")
+  .action(async (runDir: string) => {
+    const v = await stageJudge(runDir);
+    printJson({ passed: v.passed, attempt: v.attempt, vetoReasons: v.vetoReasons });
+  });
+
+stage
+  .command("capsule")
+  .argument("<runDir>")
+  .option("--error <message>", "record that an earlier stage failed")
+  .description("Clio: write the capsule, PR body and Check Run")
+  .action(async (runDir: string, o: { error?: string }) => {
+    const out = await stageCapsule(runDir, o.error);
+    printJson({ verdict: out.capsule.verdict, branch: out.capsule.branch });
   });
 
 program.parseAsync().catch((err: unknown) => {

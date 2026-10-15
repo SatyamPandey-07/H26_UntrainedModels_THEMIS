@@ -12,7 +12,9 @@ metadata:
 ## Branch rules
 
 - Work only in the worktree on branch `themis/<dep>-<YYYYMMDD>`. Never touch the base branch.
-- One commit per concern, in plan order. Commit messages: `themis(<kind>): <concern title>`.
+- One commit per concern, in plan order, written by the engine in Conventional Commits form. See
+  [references/commit-messages.md](references/commit-messages.md). Your edit summary becomes the commit body,
+  so write one plain sentence per file describing what changed and why.
 
 ## Order of changes
 

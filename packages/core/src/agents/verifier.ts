@@ -297,8 +297,11 @@ export async function runVerifierSide(
 }
 
 /** Minos, verdict: compares the two sides, rescans usage, measures coverage and holds the veto. */
-export async function runVerifierJudge(ctx: RunContext, input: VerifierInput): Promise<VerifierResult> {
-  const { findings, plan, migration, sandbox, attempt } = input;
+export async function runVerifierJudge(
+  ctx: RunContext,
+  input: Omit<VerifierInput, "sandbox"> & { isolated: boolean },
+): Promise<VerifierResult> {
+  const { findings, plan, migration, attempt } = input;
   const toolchain = findings.toolchain;
   const eco = ecosystemFor(toolchain);
   const worktree = migration.worktreePath;
@@ -309,7 +312,7 @@ export async function runVerifierJudge(ctx: RunContext, input: VerifierInput): P
   const logTails: VerifierFeedback["logTails"] = [];
   const claims = [...base.claims, ...cand.claims];
 
-  if (!sandbox.isolated)
+  if (!input.isolated)
     book.unverified(
       "unresolved",
       "Verification ran on the host without the Docker sandbox: no network cut, resource limits or read-only source.",
@@ -525,5 +528,5 @@ export async function runVerifier(
   const probes = await planProbes(ctx, llm, input);
   await runVerifierSide(ctx, input, "baseline", probes);
   await runVerifierSide(ctx, input, "candidate", probes);
-  return runVerifierJudge(ctx, input);
+  return runVerifierJudge(ctx, { ...input, isolated: input.sandbox.isolated });
 }
