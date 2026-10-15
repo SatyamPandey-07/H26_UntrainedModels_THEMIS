@@ -16,6 +16,7 @@ import { addWorktree, branchExists, commitFiles, dirtyFiles, trackedFiles } from
 import { opengrepAutofix, opengrepAvailable } from "../tools/opengrep.js";
 import { ecosystemFor } from "../ecosystems/index.js";
 import { slugify } from "../util/misc.js";
+import { commitMessage } from "../messages.js";
 import { runAgent } from "./base.js";
 import { editTools, readOnlyTools } from "./fs-tools.js";
 
@@ -118,7 +119,9 @@ export async function runMigrator(
   const lockfile = lockfileFor(pm);
   const dependencyFinding = findings.dependencies.find((d) => d.name === plan.dependency);
   const branch = input.previous?.branch ?? branchName(plan.dependency);
-  const worktree = input.previous?.worktreePath ?? join(tmpdir(), "themis-worktrees", ctx.runId);
+  // THEMIS_WORKTREE_ROOT keeps the worktree inside the CI workspace so it can be handed to the next job.
+  const worktreeRoot = process.env.THEMIS_WORKTREE_ROOT ?? join(tmpdir(), "themis-worktrees");
+  const worktree = input.previous?.worktreePath ?? join(worktreeRoot, ctx.runId);
   const commits: MigrationResult["commits"] = [...(input.previous?.commits ?? [])];
   let keptTests = [...(input.previous?.keptTests ?? [])];
   const discardedTests = [...(input.previous?.discardedTests ?? [])];
@@ -126,7 +129,7 @@ export async function runMigrator(
   if (!input.previous) {
     if (await branchExists(ctx.repoPath, branch))
       logEvent(ctx, `hephaestus: branch ${branch} exists locally and will be reset from the base commit`);
-    mkdirSync(join(tmpdir(), "themis-worktrees"), { recursive: true });
+    mkdirSync(worktreeRoot, { recursive: true });
     rmSync(worktree, { recursive: true, force: true });
     const wt = await addWorktree(ctx, ctx.repoPath, worktree, branch, findings.baseCommit);
     if (wt.exitCode !== 0) throw new Error(`could not create worktree for ${branch}; see ${wt.logPath}`);
@@ -137,11 +140,23 @@ export async function runMigrator(
     );
   }
 
-  const commit = async (concern: Pick<Concern, "id" | "kind" | "title">, files: string[]) => {
-    const sha = await commitFiles(ctx, worktree, files, `themis(${concern.kind}): ${concern.title}`);
+  const commit = async (
+    concern: Pick<Concern, "id" | "kind" | "title">,
+    files: string[],
+    extra: { summary?: string; model?: string } = {},
+  ) => {
+    const planned = plan.concerns.find((c) => c.id === concern.id);
+    const message = commitMessage({
+      concern: { ...concern, files, instructions: planned?.instructions ?? "" },
+      plan,
+      runId: ctx.runId,
+      ...extra,
+    });
+    const sha = await commitFiles(ctx, worktree, files, message);
     if (sha) {
-      commits.push({ sha, concernId: concern.id, message: `themis(${concern.kind}): ${concern.title}` });
-      logEvent(ctx, `hephaestus: committed ${concern.id} as ${sha.slice(0, 7)}`);
+      const subject = message.split("\n")[0] as string;
+      commits.push({ sha, concernId: concern.id, message: subject });
+      logEvent(ctx, `hephaestus: committed ${concern.id} as ${sha.slice(0, 7)}: ${subject}`);
     }
     return sha;
   };
@@ -199,7 +214,7 @@ export async function runMigrator(
       outputDescription: "Submit a summary of your edits and any call sites left unresolved.",
       maxSteps: 24,
     });
-    const sha = await commit(concern, [...written]);
+    const sha = await commit(concern, [...written], { summary: result.output.summary, model: result.model });
     if (sha)
       book.recommended(
         "proposed-changes",

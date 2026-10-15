@@ -1,5 +1,5 @@
 import type { Context, Probot } from "probot";
-import { DASHBOARD_TITLE, isDashboard, newlyTicked } from "./dashboard.js";
+import { DASHBOARD_TITLE, dependencySlug, isDashboard, newlyTicked } from "./dashboard.js";
 
 /** Runner repository that executes Themis jobs (`owner/name`); the App must be installed there too. */
 const RUNNER_REPO = process.env.RUNNER_REPO ?? "SatyamPandey-07/H26_UntrainedModels_THEMIS";
@@ -50,7 +50,9 @@ async function openThemisPrCount(context: AnyContext, owner: string, repo: strin
   const themis = prs.filter(
     (p) => p.head.ref.startsWith("themis/") && p.labels.some((l) => l.name === "themis"),
   );
-  const forPackage = pkg ? themis.find((p) => p.title.includes(`\`${pkg}\``)) : undefined;
+  const forPackage = pkg
+    ? themis.find((p) => p.head.ref.startsWith(`themis/${dependencySlug(pkg)}-`))
+    : undefined;
   return { total: themis.length, forPackage };
 }
 

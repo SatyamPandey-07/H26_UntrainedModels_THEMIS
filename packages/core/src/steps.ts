@@ -20,6 +20,7 @@ import { commitFiles, dirtyFiles, isGitRepo, remoteSlug, removeWorktree, tracked
 import { dedupeSites, opengrepAvailable, opengrepMapper } from "./tools/opengrep.js";
 import { ecosystemFor } from "./ecosystems/index.js";
 import { isPrerelease, slugify } from "./util/misc.js";
+import { commitMessage } from "./messages.js";
 
 /**
  * Step commands for the Claude Code plugin. Claude Code is the model: it writes rules, the plan draft, code edits
@@ -190,7 +191,13 @@ export async function stepCommit(
   };
   const files = (await dirtyFiles(migration.worktreePath)).filter((f) => !f.startsWith(".themis/"));
   if (files.length === 0) throw new Error(`no changed files in ${migration.worktreePath}`);
-  const message = `themis(${concern.kind}): ${concern.title}`;
+  const message = commitMessage({
+    concern: { ...concern, files },
+    plan,
+    runId: ctx.runId,
+    summary,
+    model: PLUGIN_MODEL,
+  });
   const sha = await commitFiles(ctx, migration.worktreePath, files, message);
   if (!sha) throw new Error("nothing was committed");
   const book = new ClaimBook("hephaestus", migration.claims.length);
@@ -200,7 +207,10 @@ export async function stepCommit(
   ]);
   const updated = MigrationResult.parse({
     ...migration,
-    commits: [...migration.commits, { sha, concernId: concern.id, message }],
+    commits: [
+      ...migration.commits,
+      { sha, concernId: concern.id, message: message.split("\n")[0] as string },
+    ],
     claims: [...migration.claims, ...book.claims],
   });
   writeJson(ctx, "migration.json", updated);
@@ -240,9 +250,14 @@ export async function stepTests(runDir: string, files: string[]): Promise<Migrat
       book,
       discarded,
       commit: async (c, paths) => {
-        const message = `themis(${c.kind}): ${c.title}`;
+        const message = commitMessage({
+          concern: { ...c, files: paths, instructions: "" },
+          plan,
+          runId: ctx.runId,
+          model: PLUGIN_MODEL,
+        });
         const sha = await commitFiles(ctx, migration.worktreePath, paths, message);
-        if (sha) commits.push({ sha, concernId: c.id, message });
+        if (sha) commits.push({ sha, concernId: c.id, message: message.split("\n")[0] as string });
         return sha;
       },
     });
