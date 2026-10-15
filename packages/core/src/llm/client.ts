@@ -27,6 +27,9 @@ export interface LlmClient {
   chat(request: ChatRequest): Promise<ChatResponse>;
 }
 
+export const COMPLETION_TOKENS = Number(process.env.THEMIS_MAX_COMPLETION_TOKENS ?? 2500);
+const REASONING_EFFORT = (process.env.THEMIS_REASONING_EFFORT ?? "low") as "low" | "medium" | "high";
+
 export class GroqClient implements LlmClient {
   private readonly client: Groq;
   readonly model: string;
@@ -70,8 +73,9 @@ export class GroqClient implements LlmClient {
         ? { tools: request.tools, tool_choice: request.toolChoice ?? "auto", parallel_tool_calls: false }
         : {}),
       temperature: request.temperature ?? 0.2,
-      max_completion_tokens: request.maxTokens ?? 8192,
-      ...(this.model.startsWith("openai/gpt-oss") ? { reasoning_effort: "medium" as const } : {}),
+      // Groq counts the reserved completion against the per-minute token limit, so keep it modest.
+      max_completion_tokens: request.maxTokens ?? COMPLETION_TOKENS,
+      ...(this.model.startsWith("openai/gpt-oss") ? { reasoning_effort: REASONING_EFFORT } : {}),
       stream: false,
     });
   }

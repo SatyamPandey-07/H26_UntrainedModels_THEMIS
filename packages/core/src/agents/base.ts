@@ -44,12 +44,49 @@ export interface AgentRunResult<T> {
   inputs: string[];
 }
 
-const MAX_TOOL_RESULT_CHARS = 24_000;
+const MAX_TOOL_RESULT_CHARS = 8_000;
+/**
+ * Prompt budget per request, in estimated tokens. Groq's free tier allows 8,000 tokens per minute per model,
+ * counting the prompt plus the reserved completion, so the default keeps one request under that limit.
+ */
+const PROMPT_TOKEN_BUDGET = Number(process.env.THEMIS_PROMPT_TOKEN_BUDGET ?? 5000);
+const CHARS_PER_TOKEN = 3.5;
 
 /** Wraps content from the repository, GitHub or tools so the model treats it as data (untrusted-input-guard). */
 export function untrusted(label: string, content: string): string {
   const safe = content.replaceAll("</untrusted_data>", "<\\/untrusted_data>");
   return `<untrusted_data source="${label.replaceAll('"', "'")}">\n${safe}\n</untrusted_data>`;
+}
+
+function estimateTokens(messages: ChatMessage[], tools: ChatTool[]): number {
+  return Math.ceil((JSON.stringify(messages).length + JSON.stringify(tools).length) / CHARS_PER_TOKEN);
+}
+
+/**
+ * Shrinks the conversation until it fits the budget: first older tool results (the model can re-read files),
+ * then the data blocks in the task message, then the skill bodies. The latest tool results are kept intact.
+ */
+function fitBudget(messages: ChatMessage[], tools: ChatTool[], budget: number): void {
+  const over = () => estimateTokens(messages, tools) > budget;
+  if (!over()) return;
+  const toolIdx = messages.map((m, i) => (m.role === "tool" ? i : -1)).filter((i) => i >= 0);
+  for (const i of toolIdx.slice(0, -2)) {
+    const m = messages[i] as { content: string };
+    if (m.content.length > 300)
+      m.content = `${m.content.slice(0, 200)}\n[older tool output removed to fit the token budget; call the tool again if needed]`;
+    if (!over()) return;
+  }
+  for (const idx of [1, 0]) {
+    const m = messages[idx] as { content: string } | undefined;
+    if (!m || typeof m.content !== "string") continue;
+    const target = Math.max(
+      2000,
+      m.content.length - (estimateTokens(messages, tools) - budget) * CHARS_PER_TOKEN - 500,
+    );
+    if (m.content.length > target)
+      m.content = `${m.content.slice(0, target)}\n[truncated to fit the token budget; use the tools to read more]`;
+    if (!over()) return;
+  }
 }
 
 function truncate(text: string, max = MAX_TOOL_RESULT_CHARS): string {
@@ -118,6 +155,7 @@ export async function runAgent<T>(
   let invalidSubmissions = 0;
   for (let step = 1; step <= maxSteps; step++) {
     const isLast = step === maxSteps;
+    fitBudget(messages, chatTools, PROMPT_TOKEN_BUDGET);
     const response = await llm.chat({ messages, tools: chatTools, toolChoice: "required" });
 
     if (response.toolCalls.length === 0) {
