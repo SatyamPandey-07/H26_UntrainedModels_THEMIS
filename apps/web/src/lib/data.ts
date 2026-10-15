@@ -355,3 +355,71 @@ export async function getThemisConfigText(token: string, repo: RepoRef): Promise
 }
 
 export { dependencySlug };
+
+export interface ActivityItem {
+  key: string;
+  kind: "pr" | "proposal" | "dashboard";
+  repo: string;
+  number: number;
+  title: string;
+  url: string;
+  /** Page inside the web app, when there is one (capsule for PRs, repository for issues). */
+  href: string;
+  at: string;
+  status: "draft" | "open" | "merged" | "closed";
+  comments?: number;
+}
+
+/** Issues and pull requests Themis raised, newest first, across the given repositories. */
+export function activityFor(overviews: RepoOverview[], limit = 12): ActivityItem[] {
+  return overviews
+    .flatMap((o) => {
+      const repo = o.repo.fullName;
+      const items: ActivityItem[] = [
+        ...o.prs.map((p) => ({
+          key: `${repo}#pr${p.number}`,
+          kind: "pr" as const,
+          repo,
+          number: p.number,
+          title: p.title,
+          url: p.url,
+          href: `/capsules/${repo}/${p.number}`,
+          at: p.createdAt,
+          status: p.merged
+            ? ("merged" as const)
+            : p.state === "closed"
+              ? ("closed" as const)
+              : p.draft
+                ? ("draft" as const)
+                : ("open" as const),
+        })),
+        ...o.proposals.map((p) => ({
+          key: `${repo}#${p.number}`,
+          kind: "proposal" as const,
+          repo,
+          number: p.number,
+          title: p.title,
+          url: p.url,
+          href: `/repos/${repo}`,
+          at: p.createdAt,
+          status: "open" as const,
+          comments: p.comments,
+        })),
+      ];
+      if (o.dashboard)
+        items.push({
+          key: `${repo}#${o.dashboard.number}`,
+          kind: "dashboard",
+          repo,
+          number: o.dashboard.number,
+          title: "Dependency Dashboard updated",
+          url: o.dashboard.url,
+          href: `/repos/${repo}`,
+          at: o.dashboard.updatedAt,
+          status: "open",
+        });
+      return items;
+    })
+    .sort((a, b) => b.at.localeCompare(a.at))
+    .slice(0, limit);
+}

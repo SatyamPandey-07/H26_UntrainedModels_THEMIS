@@ -3,12 +3,13 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ActionButton } from "@/components/app/action-button";
+import { ActivityFeed } from "@/components/app/activity-feed";
 import { EmptyState } from "@/components/app/empty-state";
 import { RunList } from "@/components/app/run-list";
 import { TikoGuide } from "@/components/tiko-guide";
 import { ButtonLink } from "@/components/ui/button";
 import { Card, SectionTitle } from "@/components/ui/card";
-import { findRepo, getRepoOverview, listRuns } from "@/lib/data";
+import { activityFor, findRepo, getRepoOverview, listRuns } from "@/lib/data";
 import { timeAgo } from "@/lib/format";
 import { requireUser } from "@/lib/session";
 
@@ -205,37 +206,13 @@ export default async function RepoPage({ params }: Params) {
 
       <div className="grid gap-6 lg:grid-cols-2">
         <Card className="p-6">
-          <SectionTitle title="Draft pull requests" description="Each one carries a capsule." />
-          {overview.prs.length ? (
-            <ul className="mt-3 divide-y divide-border">
-              {overview.prs.map((p) => (
-                <li key={p.number} className="flex items-center gap-3 py-3">
-                  <GitPullRequest
-                    size={18}
-                    className={
-                      p.merged
-                        ? "text-[color:var(--tag-ai)]"
-                        : p.state === "open"
-                          ? "text-[color:var(--tag-executed)]"
-                          : "text-ink-muted"
-                    }
-                    aria-hidden="true"
-                  />
-                  <Link
-                    href={`/capsules/${repo.fullName}/${p.number}`}
-                    className="min-w-0 flex-1 hover:underline"
-                  >
-                    <span className="block truncate text-sm font-semibold">{p.title}</span>
-                    <span className="block text-xs text-ink-muted">
-                      #{p.number} · {p.merged ? "merged" : p.state} · {timeAgo(p.createdAt)}
-                    </span>
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="mt-4 text-sm text-ink-muted">No Themis pull requests yet.</p>
-          )}
+          <SectionTitle
+            title="Issues and pull requests"
+            description="Proposals, the dashboard and draft PRs Themis opened here."
+          />
+          <div className="mt-2">
+            <ActivityFeed items={activityFor([overview], 20)} showRepo={false} />
+          </div>
         </Card>
         <Card className="p-6">
           <SectionTitle

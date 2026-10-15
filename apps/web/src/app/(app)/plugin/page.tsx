@@ -7,10 +7,10 @@ export const metadata: Metadata = { title: "Claude Code plugin" };
 const steps = [
   {
     title: "Add the marketplace and install",
-    code: "/plugin marketplace add SatyamPandey-07/H26_UntrainedModels_THEMIS\n/plugin install themis@themis",
+    code: "/plugin marketplace add SatyamPandey-07/H26_UntrainedModels_THEMIS\n/plugin install themis@themis\n/reload-plugins",
   },
-  { title: "Find the riskiest dependency", code: "/themis" },
-  { title: "Migrate it with evidence", code: "/themis migrate svix" },
+  { title: "Find the riskiest dependency", code: "/themis:scan" },
+  { title: "Migrate it with evidence", code: "/themis:migrate requests" },
 ];
 
 export default function Plugin() {

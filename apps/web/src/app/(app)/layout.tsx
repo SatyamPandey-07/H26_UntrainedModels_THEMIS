@@ -1,6 +1,7 @@
 import { SignOut } from "@phosphor-icons/react/dist/ssr";
 import Image from "next/image";
 import { AppNav } from "@/components/app/app-nav";
+import { AutoRefresh } from "@/components/app/auto-refresh";
 import { Logo } from "@/components/site/logo";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { requireUser } from "@/lib/session";
@@ -47,6 +48,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <main id="main" tabIndex={-1} className="min-w-0 px-4 py-6 outline-none md:px-10 md:py-10">
         {children}
       </main>
+      <AutoRefresh />
     </div>
   );
 }

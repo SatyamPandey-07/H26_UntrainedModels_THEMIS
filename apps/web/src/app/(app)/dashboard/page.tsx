@@ -8,13 +8,14 @@ import {
 import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { ActivityFeed } from "@/components/app/activity-feed";
 import { EmptyState } from "@/components/app/empty-state";
 import { RiskChart } from "@/components/app/risk-chart";
 import { RunList } from "@/components/app/run-list";
 import { TikoGuide } from "@/components/tiko-guide";
 import { ButtonLink } from "@/components/ui/button";
 import { Card, SectionTitle } from "@/components/ui/card";
-import { getAllOverviews, listRuns } from "@/lib/data";
+import { activityFor, getAllOverviews, listRuns } from "@/lib/data";
 import { timeAgo } from "@/lib/format";
 import { requireUser } from "@/lib/session";
 
@@ -120,6 +121,16 @@ export default async function Dashboard() {
           )}
         </Card>
       </div>
+
+      <Card data-tour="activity" className="p-6">
+        <SectionTitle
+          title="Issues and pull requests"
+          description="Everything Themis opened on GitHub, newest first. This page refreshes itself while open."
+        />
+        <div className="mt-2">
+          <ActivityFeed items={activityFor(overviews)} />
+        </div>
+      </Card>
 
       <Card data-tour="runs" className="p-6">
         <SectionTitle

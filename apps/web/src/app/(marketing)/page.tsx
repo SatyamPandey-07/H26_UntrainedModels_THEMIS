@@ -292,7 +292,9 @@ export default function Home() {
               The same pipeline on your machine. Claude Code is the model, so no API key is needed.
             </p>
             <pre className="mt-6 overflow-x-auto rounded-2xl bg-black/25 p-4 font-mono text-sm text-accent">
-              /plugin install themis --marketplace SatyamPandey-07/H26_UntrainedModels_THEMIS
+              {
+                "/plugin marketplace add SatyamPandey-07/H26_UntrainedModels_THEMIS\n/plugin install themis@themis"
+              }
             </pre>
           </div>
         </Reveal>
