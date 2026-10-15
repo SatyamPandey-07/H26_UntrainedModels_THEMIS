@@ -264,8 +264,10 @@ export async function runPlanner(
     planInputs = result.inputs;
     const target = await npmRegistryInfo(result.output.target.name);
     if (!target) planFeedback = `package "${result.output.target.name}" does not exist on npm`;
+    else if (/-/.test(result.output.target.version))
+      planFeedback = `${result.output.target.name}@${result.output.target.version} is a pre-release; pick a stable release (latest stable is ${target.latestStable ?? "unknown"})`;
     else if (!target.versionExists(result.output.target.version))
-      planFeedback = `version ${result.output.target.version} of ${result.output.target.name} does not exist; latest is ${target.latestVersion}`;
+      planFeedback = `version ${result.output.target.version} of ${result.output.target.name} does not exist; latest stable is ${target.latestStable ?? target.latestVersion}`;
     else draft = result.output;
     if (planFeedback && attempt === 1) {
       draft = {

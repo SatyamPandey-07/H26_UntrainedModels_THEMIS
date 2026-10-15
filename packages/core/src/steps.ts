@@ -120,6 +120,10 @@ export async function stepPlan(runDir: string, draftFile: string): Promise<Migra
   const draft = parsed.data;
   const target = await npmRegistryInfo(draft.target.name);
   if (!target) throw new Error(`plan draft rejected: package "${draft.target.name}" does not exist on npm`);
+  if (/-/.test(draft.target.version))
+    throw new Error(
+      `plan draft rejected: ${draft.target.name}@${draft.target.version} is a pre-release; use a stable release (latest stable is ${target.latestStable ?? "unknown"})`,
+    );
   if (!target.versionExists(draft.target.version))
     throw new Error(
       `plan draft rejected: ${draft.target.name}@${draft.target.version} does not exist; latest is ${target.latestVersion}`,
