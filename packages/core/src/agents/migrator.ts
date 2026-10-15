@@ -9,12 +9,12 @@ import type { LlmClient } from "../llm/client.js";
 import type { RunContext } from "../run/context.js";
 import { logEvent, resolveRunPath, writeJson } from "../run/context.js";
 import type { Sandbox } from "../sandbox/sandbox.js";
-import { singleTestCommand } from "../sandbox/tests.js";
 import type { Concern, Findings, MigrationPlan, MigrationResult, Toolchain } from "../schema/stages.js";
 import { MigrationResult as MigrationResultSchema } from "../schema/stages.js";
 import { readSkillFile } from "../skills/loader.js";
 import { addWorktree, branchExists, commitFiles, dirtyFiles, trackedFiles } from "../tools/git.js";
 import { opengrepAutofix, opengrepAvailable } from "../tools/opengrep.js";
+import { ecosystemFor } from "../ecosystems/index.js";
 import { slugify } from "../util/misc.js";
 import { runAgent } from "./base.js";
 import { editTools, readOnlyTools } from "./fs-tools.js";
@@ -113,6 +113,7 @@ export async function runMigrator(
   const book = new ClaimBook("hephaestus", input.previous?.claims.length ?? 0);
   const slug = slugify(plan.dependency);
   const toolchain = findings.toolchain;
+  const eco = ecosystemFor(toolchain);
   const pm = toolchain.packageManager;
   const lockfile = lockfileFor(pm);
   const dependencyFinding = findings.dependencies.find((d) => d.name === plan.dependency);
@@ -214,7 +215,25 @@ export async function runMigrator(
 
   if (attempt === 0) {
     for (const concern of plan.concerns) {
-      if (concern.kind === "toolchain") {
+      if (concern.kind === "toolchain" && eco.proposeLintConfig) {
+        const r = await eco.proposeLintConfig({ ctx, worktree, toolchain, book });
+        if (r.ok) await commit(concern, r.files);
+      } else if (concern.kind === "dependency" && eco.applyDependencyChange) {
+        const dev = dependencyFinding?.dev ?? false;
+        const r = await eco.applyDependencyChange(
+          { ctx, worktree, toolchain, book },
+          { strategy: plan.strategy, dependency: plan.dependency, target: plan.target, dev },
+        );
+        if (!r.ok) {
+          book.unverified(
+            "unresolved",
+            `Dependency change failed: ${r.error ?? "unknown error"}`,
+            "see run log",
+          );
+          throw new Error(`dependency change failed: ${r.error ?? "unknown error"}`);
+        }
+        await commit(concern, r.files);
+      } else if (concern.kind === "toolchain") {
         writeFileSync(join(worktree, "eslint.config.mjs"), MINIMAL_ESLINT_CONFIG);
         const r = await runPm("pm-add-eslint", pmCommand(pm, "add", ["eslint@^9", "@eslint/js@^9"], true));
         if (r.exitCode === 0) {
@@ -263,7 +282,12 @@ export async function runMigrator(
           );
           continue;
         }
-        const r = await opengrepAutofix(ctx, worktree, resolveRunPath(ctx, fixRule.path));
+        const r = await opengrepAutofix(
+          ctx,
+          worktree,
+          resolveRunPath(ctx, fixRule.path),
+          eco.opengrepExcludes,
+        );
         const changed = (await dirtyFiles(worktree)).filter((f) => !f.startsWith(".themis/"));
         const sha = await commit(concern, changed);
         if (sha)
@@ -348,30 +372,30 @@ async function generateCharacterizationTests(
   t: TestGenInput,
 ): Promise<string[]> {
   const slug = slugify(t.plan.dependency);
+  const eco = ecosystemFor(t.toolchain);
   const written = new Set<string>();
   const all = await trackedFiles(t.worktree);
-  const existingTests = all.filter((f) => /\.(test|spec)\.[cm]?[jt]sx?$/.test(f)).slice(0, 40);
+  const existingTests = all.filter((f) => eco.testFile.test(f)).slice(0, 40);
   const result = await runAgent(ctx, llm, {
     agent: "hephaestus",
     label: "characterization-tests",
     task: [
       `Write characterization tests that pin the CURRENT behaviour of the project functions that use ${t.plan.dependency}.`,
-      `Name each file themis-${slug}.characterization.test.<ext> and place it next to existing tests so the`,
-      `${t.toolchain.testRunner ?? "project"} runner picks it up. Each test name must start with the call site as`,
-      "file:line. Import project modules, never the dependency directly. Use fixed inputs only.",
+      eco.characterizationHint(slug, t.toolchain),
     ].join(" "),
     data: {
       "call-sites.json": JSON.stringify(t.plan.usage, null, 2),
       "suggested-tests.md": t.concern.instructions,
       "toolchain.json": JSON.stringify(t.toolchain, null, 2),
       "existing-test-files.txt": existingTests.join("\n") || "(no existing tests)",
-      "test-shapes.md": readSkillFile("characterization-tests", "references/test-shapes.md"),
+      "test-shapes.md": readSkillFile("characterization-tests", eco.testShapesReference),
+      ...(eco.characterizationData?.(t.plan.usage) ?? {}),
     },
     tools: [
       ...readOnlyTools(t.worktree),
       ...editTools(
         t.worktree,
-        (p) => isCharacterizationTest(p, slug),
+        (p) => eco.isCharacterizationTest(p, slug),
         (p) => written.add(p),
       ),
     ],
@@ -416,6 +440,7 @@ export async function validateCharacterizationTests(
   t: TestValidationInput,
 ): Promise<string[]> {
   const files = t.files;
+  const eco = ecosystemFor(t.toolchain);
   const baseline = await t.sandbox.prepare(ctx, "baseline", t.baseCommit);
   if (baseline.install.exitCode !== 0) {
     for (const f of files) {
@@ -436,7 +461,7 @@ export async function validateCharacterizationTests(
 
   const kept: string[] = [];
   for (const f of files) {
-    const r = await t.sandbox.exec(ctx, baseline, singleTestCommand(t.toolchain, f), {
+    const r = await t.sandbox.exec(ctx, baseline, eco.singleTestCommand(t.toolchain, f), {
       label: `chartest-${slugify(f).slice(-40)}`,
       mounts: { [join(t.worktree, f)]: f },
       timeoutMs: 10 * 60_000,

@@ -2,12 +2,10 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 import { ClaimBook } from "../evidence/claims.js";
-import { shellQuote } from "../evidence/command.js";
 import type { LlmClient } from "../llm/client.js";
 import type { RunContext } from "../run/context.js";
 import { logEvent, resolveRunPath, writeJson } from "../run/context.js";
 import type { PreparedRef, ProbeRequest, ProbeResponse, Sandbox } from "../sandbox/sandbox.js";
-import { parseTestOutput, testCommand } from "../sandbox/tests.js";
 import type {
   Findings,
   MigrationPlan,
@@ -18,9 +16,10 @@ import type {
 } from "../schema/stages.js";
 import { Verification as VerificationSchema } from "../schema/stages.js";
 import { countLintViolations } from "../tools/lint.js";
-import { changedFiles, headCommit } from "../tools/git.js";
-import { opengrepAvailable, opengrepMapper, regexUsageMap } from "../tools/opengrep.js";
-import { DEFAULT_SCANNERS, dedupeVulnerabilities } from "../tools/scanners.js";
+import { changedFiles, headCommit, trackedFiles } from "../tools/git.js";
+import { opengrepAvailable, opengrepMapper } from "../tools/opengrep.js";
+import { dedupeVulnerabilities } from "../tools/scanners.js";
+import { ecosystemFor } from "../ecosystems/index.js";
 import { tail } from "../util/misc.js";
 import { runAgent } from "./base.js";
 import { listFiles } from "./fs-tools.js";
@@ -50,8 +49,6 @@ const ProbeChoice = z.object({
     )
     .max(6),
 });
-
-const SOURCE_RE = /\.(c|m)?(j|t)sx?$/;
 
 function readLogTail(ctx: RunContext, logPath: string, lines = 120): string {
   const abs = resolveRunPath(ctx, logPath);
@@ -85,6 +82,7 @@ export async function runVerifier(
   const { findings, plan, migration, sandbox, attempt } = input;
   const book = new ClaimBook("minos");
   const toolchain = findings.toolchain;
+  const eco = ecosystemFor(toolchain);
   const worktree = migration.worktreePath;
   const candidateCommit = await headCommit(worktree);
   const vetoReasons: string[] = [];
@@ -123,7 +121,7 @@ export async function runVerifier(
   const bothBuilt = baseline.install.exitCode === 0 && candidate.install.exitCode === 0;
 
   const changed = await changedFiles(worktree, findings.baseCommit);
-  const changedSource = changed.filter((f) => SOURCE_RE.test(f) && !migration.keptTests.includes(f));
+  const changedSource = changed.filter((f) => eco.sourceFile.test(f) && !migration.keptTests.includes(f));
   const testMounts = Object.fromEntries(migration.keptTests.map((f) => [join(worktree, f), f]));
 
   // 2. Tests: same command on both sides; characterization tests are mounted read-only into the baseline.
@@ -134,15 +132,24 @@ export async function runVerifier(
   const fixedFailures: string[] = [];
   if (bothBuilt && (toolchain.testRunner || toolchain.testCommand)) {
     const full = process.env.THEMIS_FULL_TESTS === "1";
+    // Ecosystems without a "related tests" runner option (Python) resolve related test files themselves.
+    const selected = eco.relatedTestFiles
+      ? [
+          ...new Set([
+            ...migration.keptTests,
+            ...eco.relatedTestFiles(worktree, changedSource, await trackedFiles(worktree)),
+          ]),
+        ]
+      : migration.keptTests;
     const cmd = full
-      ? testCommand(toolchain, [])
-      : testCommand(toolchain, migration.keptTests, { related: changedSource });
+      ? eco.testCommand(toolchain, [])
+      : eco.testCommand(toolchain, selected, { related: changedSource });
     const run = async (
       ref: PreparedRef,
       mounts: Record<string, string>,
     ): Promise<{ run: TestRun; passing: string[] }> => {
       const r = await sandbox.exec(ctx, ref, cmd, { label: "tests", mounts, timeoutMs: 30 * 60_000 });
-      const p = parseTestOutput(r.stdout, r.exitCode);
+      const p = eco.parseTestOutput(r.stdout, r.exitCode);
       return {
         run: {
           command: cmd,
@@ -206,13 +213,10 @@ export async function runVerifier(
   let baseLint: SideResult["lint"];
   let candLint: SideResult["lint"];
   let lintDelta = 0;
-  const lintable = changedSource.filter((f) => /\.(c|m)?(j|t)sx?$/.test(f));
-  if (
-    bothBuilt &&
-    lintable.length > 0 &&
-    (toolchain.linters.includes("eslint") || toolchain.lintConfigProposed)
-  ) {
-    const cmd = `npx --no-install eslint --no-warn-ignored ${lintable.map(shellQuote).join(" ")}`;
+  const lintable = changedSource.filter((f) => eco.sourceFile.test(f));
+  const lintInvocation = bothBuilt && lintable.length > 0 ? eco.lintCommand(toolchain, lintable) : undefined;
+  if (lintInvocation) {
+    const cmd = lintInvocation.command;
     const lint = async (ref: PreparedRef) => {
       const r = await sandbox.exec(ctx, ref, cmd, { label: "lint", timeoutMs: 15 * 60_000 });
       return {
@@ -228,7 +232,7 @@ export async function runVerifier(
       lintDelta = candLint.violations - baseLint.violations;
       book.executed(
         "executed-results",
-        `ESLint on changed files: baseline ${baseLint.violations}, candidate ${candLint.violations} violation(s)`,
+        `${lintInvocation.label} on changed files: baseline ${baseLint.violations}, candidate ${candLint.violations} violation(s)`,
         candLint,
       );
       if (lintDelta > 0)
@@ -238,7 +242,7 @@ export async function runVerifier(
     } else {
       book.executed(
         "executed-results",
-        `ESLint (config added by Themis) reports ${candLint.violations} violation(s) in changed files`,
+        `${lintInvocation.label} (config added by Themis) reports ${candLint.violations} violation(s) in changed files`,
         candLint,
       );
       book.unverified(
@@ -253,7 +257,7 @@ export async function runVerifier(
   const scanSide = async (dir: string) => {
     const ids = new Set<string>();
     let first: { command: string; logPath: string; exitCode: number } | undefined;
-    for (const scanner of DEFAULT_SCANNERS) {
+    for (const scanner of eco.scanners) {
       const out = await scanner.scan(ctx, dir);
       if (!out.ok) continue;
       first ??= { command: out.command, logPath: out.logPath, exitCode: out.exitCode };
@@ -293,7 +297,12 @@ export async function runVerifier(
   let remaining: string[] = [];
   if (plan.strategy === "replace") {
     if (usageRule && (await opengrepAvailable(ctx))) {
-      const out = await opengrepMapper.map(ctx, worktree, resolveRunPath(ctx, usageRule.path));
+      const out = await opengrepMapper.map(
+        ctx,
+        worktree,
+        resolveRunPath(ctx, usageRule.path),
+        eco.opengrepExcludes,
+      );
       if (out.ok) {
         remaining = out.data.filter((s) => s.symbol === "import").map((s) => `${s.file}:${s.line}`);
         book.executed(
@@ -304,7 +313,8 @@ export async function runVerifier(
       }
     } else {
       const files = listFiles(worktree, ".", 5000);
-      remaining = regexUsageMap(worktree, files, plan.dependency)
+      remaining = eco
+        .regexUsageMap(worktree, files, plan.dependency)
         .filter((s) => s.symbol === "import")
         .map((s) => `${s.file}:${s.line}`);
       book.unverified(
@@ -327,7 +337,7 @@ export async function runVerifier(
   let candProbeLog: string | undefined;
   if (bothBuilt && toolchain.startCommand && toolchain.port && sandbox.kind === "docker" && llm) {
     const routeFiles = listFiles(worktree, ".", 3000)
-      .filter((f) => /(routes?|api|server|app)\b/.test(f) && SOURCE_RE.test(f))
+      .filter((f) => /(routes?|api|server|app)\b/.test(f) && eco.sourceFile.test(f))
       .slice(0, 60);
     const choice = await runAgent(ctx, llm, {
       agent: "minos",
@@ -380,7 +390,7 @@ export async function runVerifier(
   // 7. Call-site coverage: every call site of the migrated dependency is affected by the change, edited or not.
   // A site is covered when a passing candidate test names it as file:line.
   const touched = plan.usage.filter((s) => s.symbol !== "import");
-  const covered = touched.filter((s) => candPassing.some((name) => name.includes(`${s.file}:${s.line}`)));
+  const covered = touched.filter((s) => candPassing.some((name) => name.includes(eco.siteTag(s))));
   const uncovered = touched.filter((s) => !covered.includes(s)).map((s) => `${s.file}:${s.line} ${s.symbol}`);
   const coverageText = `Call-site coverage: ${covered.length} of ${touched.length} affected call sites exercised by passing characterization tests`;
   if (candTests) book.executed("executed-results", coverageText, candTests);

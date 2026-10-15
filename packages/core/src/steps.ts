@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { z } from "zod";
-import { finalizePlan, importRule, parseRules, PlanDraft, writeRules } from "./agents/planner.js";
+import { finalizePlan, parseRules, PlanDraft, writeRules } from "./agents/planner.js";
 import type { RuleFile } from "./agents/planner.js";
 import { runMigrator, validateCharacterizationTests } from "./agents/migrator.js";
 import { runScout } from "./agents/scout.js";
@@ -17,8 +17,8 @@ import { createSandbox, HostSandbox } from "./sandbox/sandbox.js";
 import { Claim } from "./schema/claim.js";
 import { Findings, MigrationPlan, MigrationResult, UsageSite } from "./schema/stages.js";
 import { commitFiles, dirtyFiles, isGitRepo, remoteSlug, removeWorktree, trackedFiles } from "./tools/git.js";
-import { dedupeSites, opengrepAvailable, opengrepMapper, regexUsageMap } from "./tools/opengrep.js";
-import { npmRegistryInfo } from "./tools/registry.js";
+import { dedupeSites, opengrepAvailable, opengrepMapper } from "./tools/opengrep.js";
+import { ecosystemFor } from "./ecosystems/index.js";
 import { slugify } from "./util/misc.js";
 
 /**
@@ -55,7 +55,8 @@ export interface MapResult {
 }
 
 /** Scan (no model), then map every use of `pkg` with the import rule plus optional rules written by Claude. */
-export async function stepMap(repoPath: string, pkg: string, rulesFile?: string): Promise<MapResult> {
+export async function stepMap(repoPath: string, pkgName: string, rulesFile?: string): Promise<MapResult> {
+  let pkg = pkgName;
   const root = resolve(repoPath);
   if (!(await isGitRepo(root))) throw new Error(`${root} is not a git repository`);
   const ctx = createRun({
@@ -66,13 +67,18 @@ export async function stepMap(repoPath: string, pkg: string, rulesFile?: string)
     config: loadConfig(root),
   });
   const findings = await runScout(ctx, undefined);
-  if (!findings.dependencies.some((d) => d.name === pkg))
-    throw new Error(`${pkg} is not a direct dependency of this repository`);
+  const eco = ecosystemFor(findings.toolchain);
+  // Python distribution names compare in normalised form (PyYAML == pyyaml); for npm this is an exact match.
+  const found = findings.dependencies.find(
+    (d) => d.name === pkg || eco.normalizeName(d.name) === eco.normalizeName(pkg),
+  );
+  if (!found) throw new Error(`${pkg} is not a direct dependency of this repository`);
+  pkg = found.name;
 
   const book = new ClaimBook("athena");
-  let rules: RuleFile = importRule(pkg);
+  let rules: RuleFile = eco.importRule(pkg);
   if (rulesFile) {
-    const parsed = parseRules(readFileSync(resolve(rulesFile), "utf8"), pkg);
+    const parsed = parseRules(readFileSync(resolve(rulesFile), "utf8"), pkg, eco.ruleLanguages);
     if (parsed.error) throw new Error(`rules file rejected: ${parsed.error}`);
     rules = { rules: [...rules.rules, ...(parsed.rules?.rules ?? [])] };
   }
@@ -81,14 +87,14 @@ export async function stepMap(repoPath: string, pkg: string, rulesFile?: string)
   let usage: UsageSite[];
   let mapper: MapResult["mapper"] = "regex";
   const outcome = (await opengrepAvailable(ctx))
-    ? await opengrepMapper.map(ctx, root, usageRulesPath)
+    ? await opengrepMapper.map(ctx, root, usageRulesPath, eco.opengrepExcludes)
     : undefined;
   if (outcome?.ok) {
     mapper = "opengrep";
     usage = dedupeSites([...outcome.data]);
     book.executed("usage-locations", `Opengrep found ${usage.length} usage site(s) of \`${pkg}\``, outcome);
   } else {
-    usage = regexUsageMap(root, files, pkg);
+    usage = eco.regexUsageMap(root, files, pkg);
     book.unverified(
       "gaps",
       outcome
@@ -106,7 +112,7 @@ export async function stepMap(repoPath: string, pkg: string, rulesFile?: string)
   return { runDir: ctx.runDir, dependency: pkg, usage, mapper };
 }
 
-/** Validate Claude's plan draft (target must exist on npm) and write plan.json. */
+/** Validate Claude's plan draft (target must exist on the registry) and write plan.json. */
 export async function stepPlan(runDir: string, draftFile: string): Promise<MigrationPlan> {
   const ctx = open(runDir);
   const findings = readJson(ctx, "findings.json", Findings);
@@ -118,8 +124,12 @@ export async function stepPlan(runDir: string, draftFile: string): Promise<Migra
       `plan draft rejected: ${parsed.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; ")}`,
     );
   const draft = parsed.data;
-  const target = await npmRegistryInfo(draft.target.name);
-  if (!target) throw new Error(`plan draft rejected: package "${draft.target.name}" does not exist on npm`);
+  const eco = ecosystemFor(findings.toolchain);
+  const target = await eco.registryInfo(draft.target.name);
+  if (!target)
+    throw new Error(
+      `plan draft rejected: package "${draft.target.name}" does not exist on ${eco.labels.registry}`,
+    );
   if (!target.versionExists(draft.target.version))
     throw new Error(
       `plan draft rejected: ${draft.target.name}@${draft.target.version} does not exist; latest is ${target.latestVersion}`,
@@ -133,7 +143,7 @@ export async function stepPlan(runDir: string, draftFile: string): Promise<Migra
     dep,
     usage: mapped.usage,
     files: await trackedFiles(ctx.repoPath),
-    usageRules: importRule(dep.name),
+    usageRules: eco.importRule(dep.name),
     usageRulesPath: resolve(ctx.runDir, mapped.usageRulesPath),
     draft,
     model: PLUGIN_MODEL,
@@ -152,7 +162,7 @@ export async function stepBranch(runDir: string): Promise<MigrationResult> {
   return runMigrator(ctx, noModel, {
     findings,
     plan,
-    sandbox: new HostSandbox(),
+    sandbox: new HostSandbox(findings.toolchain),
     attempt: 0,
     deterministicOnly: true,
   });
@@ -200,7 +210,7 @@ export async function stepTests(runDir: string, files: string[]): Promise<Migrat
   const findings = readJson(ctx, "findings.json", Findings);
   const plan = readJson(ctx, "plan.json", MigrationPlan);
   const migration = readJson(ctx, "migration.json", MigrationResult);
-  const sandbox = await createSandbox(ctx, findings.toolchain.nodeVersion);
+  const sandbox = await createSandbox(ctx, findings.toolchain);
   const book = new ClaimBook("hephaestus", migration.claims.length);
   book.recommended(
     "suggested-tests",
@@ -253,7 +263,7 @@ export async function stepVerify(runDir: string): Promise<CapsuleOutput> {
   const findings = readJson(ctx, "findings.json", Findings);
   const plan = readJson(ctx, "plan.json", MigrationPlan);
   const migration = readJson(ctx, "migration.json", MigrationResult);
-  const sandbox = await createSandbox(ctx, findings.toolchain.nodeVersion);
+  const sandbox = await createSandbox(ctx, findings.toolchain);
   try {
     const { verification } = await runVerifier(ctx, undefined, {
       findings,

@@ -4,6 +4,8 @@ import { dirname, join } from "node:path";
 import { recordToolVersion, runCommand } from "../evidence/command.js";
 import type { CommandResult } from "../evidence/command.js";
 import type { RunContext } from "../run/context.js";
+import type { Toolchain } from "../schema/stages.js";
+import { PYTHON_PROBE_SCRIPT, pythonBuildSpec, pythonHostInstall } from "../ecosystems/python/sandbox.js";
 import { exportCommit } from "../tools/git.js";
 import { findSkillsDir } from "../skills/loader.js";
 import { parseVersion, safeJson } from "../util/misc.js";
@@ -124,7 +126,10 @@ export class DockerSandbox implements Sandbox {
   private containers = new Set<string>();
   private cache = new Map<string, PreparedRef>();
 
-  constructor(private readonly nodeVersion?: string) {}
+  constructor(
+    private readonly nodeVersion?: string,
+    private readonly toolchain?: Toolchain,
+  ) {}
 
   static async available(ctx: RunContext): Promise<boolean> {
     return Boolean(
@@ -144,21 +149,17 @@ export class DockerSandbox implements Sandbox {
     const exported = await exportCommit(ctx, ctx.repoPath, commit, dir);
     if (exported.exitCode !== 0) throw new Error(`could not export ${commit}; see ${exported.logPath}`);
     const tag = `${this.name(ctx, label)}:${commit.slice(0, 12)}`;
+    const spec =
+      this.toolchain?.language === "python"
+        ? pythonBuildSpec(this.toolchain, dir)
+        : {
+            dockerfile: dockerfilePath(),
+            buildArgs: ["--build-arg", `NODE_VERSION=${nodeMajor(this.nodeVersion)}`],
+          };
     const install = await runCommand(ctx, {
       label: `docker-build-${label}`,
       file: "docker",
-      args: [
-        "build",
-        "--file",
-        dockerfilePath(),
-        "--build-arg",
-        `NODE_VERSION=${nodeMajor(this.nodeVersion)}`,
-        "--tag",
-        tag,
-        "--progress",
-        "plain",
-        dir,
-      ],
+      args: ["build", "--file", spec.dockerfile, ...spec.buildArgs, "--tag", tag, "--progress", "plain", dir],
       cwd: dir,
       timeoutMs: 30 * 60_000,
     });
@@ -240,9 +241,9 @@ export class DockerSandbox implements Sandbox {
         net,
         ...SANDBOX_LIMITS,
         ref.handle,
-        "node",
-        "-e",
-        PROBE_SCRIPT,
+        ...(this.toolchain?.language === "python"
+          ? ["python", "-c", PYTHON_PROBE_SCRIPT]
+          : ["node", "-e", PROBE_SCRIPT]),
         `http://${app}:${service.port}`,
         JSON.stringify(requests),
       ],
@@ -288,6 +289,19 @@ export class HostSandbox implements Sandbox {
   private dirs = new Set<string>();
   private cache = new Map<string, PreparedRef>();
 
+  constructor(private readonly toolchain?: Toolchain) {}
+
+  /** Environment for commands run in an exported directory; Python puts its virtualenv first on PATH. */
+  private runEnv(dir: string): Record<string, string> {
+    const base = { CI: "true", TZ: "UTC", HUSKY: "0" };
+    if (this.toolchain?.language !== "python") return base;
+    return {
+      ...base,
+      VIRTUAL_ENV: join(dir, ".venv"),
+      PATH: `${join(dir, ".venv", "bin")}:${process.env.PATH ?? ""}`,
+    };
+  }
+
   async prepare(ctx: RunContext, label: string, commit: string): Promise<PreparedRef> {
     const cached = this.cache.get(commit);
     if (cached) return { ...cached, label };
@@ -295,17 +309,20 @@ export class HostSandbox implements Sandbox {
     rmSync(dir, { recursive: true, force: true });
     await exportCommit(ctx, ctx.repoPath, commit, dir);
     this.dirs.add(dir);
-    const installCmd = existsSync(join(dir, "pnpm-lock.yaml"))
-      ? "corepack enable && pnpm install --frozen-lockfile"
-      : existsSync(join(dir, "package-lock.json"))
-        ? "npm ci"
-        : "npm install";
+    const installCmd =
+      this.toolchain?.language === "python"
+        ? pythonHostInstall(dir, this.toolchain)
+        : existsSync(join(dir, "pnpm-lock.yaml"))
+          ? "corepack enable && pnpm install --frozen-lockfile"
+          : existsSync(join(dir, "package-lock.json"))
+            ? "npm ci"
+            : "npm install";
     const install = await runCommand(ctx, {
       label: `host-install-${label}`,
       file: "sh",
       args: ["-c", installCmd],
       cwd: dir,
-      env: { CI: "true", HUSKY: "0", TZ: "UTC" },
+      env: this.runEnv(dir),
       timeoutMs: 30 * 60_000,
     });
     const ref = { label, commit, handle: dir, install };
@@ -325,7 +342,7 @@ export class HostSandbox implements Sandbox {
         file: "sh",
         args: ["-c", command],
         cwd: ref.handle,
-        env: { CI: "true", TZ: "UTC", HUSKY: "0" },
+        env: this.runEnv(ref.handle),
         timeoutMs: opts.timeoutMs ?? 20 * 60_000,
       });
     } finally {
@@ -356,9 +373,15 @@ export class HostSandbox implements Sandbox {
 }
 
 /** Docker when the daemon answers; otherwise the host runner (never silently in CI). */
-export async function createSandbox(ctx: RunContext, nodeVersion?: string): Promise<Sandbox> {
-  if (await DockerSandbox.available(ctx)) return new DockerSandbox(nodeVersion);
+export async function createSandbox(
+  ctx: RunContext,
+  nodeVersionOrToolchain?: string | Toolchain,
+): Promise<Sandbox> {
+  const toolchain = typeof nodeVersionOrToolchain === "object" ? nodeVersionOrToolchain : undefined;
+  const nodeVersion =
+    typeof nodeVersionOrToolchain === "object" ? nodeVersionOrToolchain.nodeVersion : nodeVersionOrToolchain;
+  if (await DockerSandbox.available(ctx)) return new DockerSandbox(nodeVersion, toolchain);
   if (process.env.CI === "true" || process.env.GITHUB_ACTIONS === "true")
     throw new Error("Docker is required in CI but the daemon is not reachable");
-  return new HostSandbox();
+  return new HostSandbox(toolchain);
 }

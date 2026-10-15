@@ -10,8 +10,9 @@ import type { Concern, DependencyFinding, Findings, MigrationPlan, UsageSite } f
 import { MigrationPlan as MigrationPlanSchema } from "../schema/stages.js";
 import { findSkillsDir, readSkillFile } from "../skills/loader.js";
 import { trackedFiles } from "../tools/git.js";
-import { dedupeSites, opengrepAvailable, opengrepMapper, regexUsageMap } from "../tools/opengrep.js";
-import { npmRegistryInfo } from "../tools/registry.js";
+import { dedupeSites, opengrepAvailable, opengrepMapper } from "../tools/opengrep.js";
+import { ecosystemFor } from "../ecosystems/index.js";
+import { importRule } from "../ecosystems/node/rules.js";
 import { slugify } from "../util/misc.js";
 import { runAgent } from "./base.js";
 import { readOnlyTools } from "./fs-tools.js";
@@ -47,31 +48,13 @@ export const PlanDraft = z.object({
 });
 export type PlanDraft = z.infer<typeof PlanDraft>;
 
-/** Deterministic import rule for a package, built from the skill's template patterns. */
-export function importRule(pkg: string): RuleFile {
-  const id = `themis-${slugify(pkg)}-import`;
-  return {
-    rules: [
-      {
-        id,
-        languages: ["javascript", "typescript"],
-        severity: "INFO",
-        message: `imports ${pkg}`,
-        metadata: { "themis-kind": "usage" },
-        paths: { exclude: ["node_modules", "dist", "build", "coverage", ".themis"] },
-        "pattern-either": [
-          { pattern: `import $M from "${pkg}"` },
-          { pattern: `import * as $M from "${pkg}"` },
-          { pattern: `import { ... } from "${pkg}"` },
-          { pattern: `const $M = require("${pkg}")` },
-          { pattern: `require("${pkg}")` },
-        ],
-      },
-    ],
-  };
-}
+export { importRule };
 
-export function parseRules(yamlText: string, pkg: string): { rules?: RuleFile; error?: string } {
+export function parseRules(
+  yamlText: string,
+  pkg: string,
+  languages: string[] = ["javascript", "typescript"],
+): { rules?: RuleFile; error?: string } {
   let doc: unknown;
   try {
     doc = parseYaml(yamlText.replace(/^```(?:ya?ml)?\s*|\s*```\s*$/g, ""));
@@ -85,7 +68,7 @@ export function parseRules(yamlText: string, pkg: string): { rules?: RuleFile; e
   for (const r of rules) {
     if (typeof r?.id !== "string" || !r.id.startsWith(prefix))
       return { error: `every rule id must start with "${prefix}"` };
-    if (!r.languages) r.languages = ["javascript", "typescript"];
+    if (!r.languages) r.languages = languages;
   }
   return { rules: { rules } };
 }
@@ -106,9 +89,15 @@ function migrationReference(pkg: string): string | undefined {
   return file ? readSkillFile("migrate-dependency", `references/${file}`) : undefined;
 }
 
-function chooseDependency(findings: Findings, requested?: string): DependencyFinding {
+function chooseDependency(
+  findings: Findings,
+  requested?: string,
+  normalize: (name: string) => string = (n) => n,
+): DependencyFinding {
   if (requested) {
-    const dep = findings.dependencies.find((d) => d.name === requested);
+    const dep =
+      findings.dependencies.find((d) => d.name === requested) ??
+      findings.dependencies.find((d) => normalize(d.name) === normalize(requested));
     if (!dep) throw new Error(`${requested} is not a direct dependency of this repository`);
     return dep;
   }
@@ -132,25 +121,27 @@ export async function runPlanner(
 ): Promise<PlannerResult> {
   const repoPath = ctx.repoPath;
   const book = new ClaimBook("athena");
-  const dep = chooseDependency(findings, requested);
+  const eco = ecosystemFor(findings.toolchain);
+  const dep = chooseDependency(findings, requested, eco.normalizeName);
   const pkg = dep.name;
   const slug = slugify(pkg);
   logEvent(ctx, `athena: planning ${pkg}@${dep.currentVersion}`);
 
   const files = await trackedFiles(repoPath);
-  const regexSites = regexUsageMap(repoPath, files, pkg);
+  const regexSites = eco.regexUsageMap(repoPath, files, pkg);
   const importingFiles = [...new Set(regexSites.map((s) => s.file))];
 
   // 1. Rules: deterministic import rule plus model-written call and fix rules.
-  const baseRules = importRule(pkg);
+  const baseRules = eco.importRule(pkg);
   const ruleTask = [
-    `Write Opengrep rules for the npm package "${pkg}". The import rule already exists; write usage rules that match`,
+    `Write Opengrep rules for the ${eco.labels.packageNoun} "${pkg}". The import rule already exists; write usage rules that match`,
     "every call made through the imported binding in the files listed, and fix rules only for purely mechanical",
     `rewrites. Rule ids must start with "themis-${slug}-". Read the files with the tools before writing patterns.`,
   ].join(" ");
   const ruleData = {
     "importing-files.txt": importingFiles.join("\n") || "(none found by text search)",
     "existing-import-rule.yaml": stringifyYaml(baseRules),
+    ...eco.promptContext(pkg, repoPath, files),
   };
 
   let usageRules: RuleFile = baseRules;
@@ -171,8 +162,10 @@ export async function runPlanner(
       outputDescription: "Submit the usage rules YAML and, optionally, fix rules YAML.",
       maxSteps: 12,
     });
-    const parsedUsage = parseRules(drafted.output.usageRulesYaml, pkg);
-    const parsedFix = drafted.output.fixRulesYaml ? parseRules(drafted.output.fixRulesYaml, pkg) : undefined;
+    const parsedUsage = parseRules(drafted.output.usageRulesYaml, pkg, eco.ruleLanguages);
+    const parsedFix = drafted.output.fixRulesYaml
+      ? parseRules(drafted.output.fixRulesYaml, pkg, eco.ruleLanguages)
+      : undefined;
     if (parsedUsage.error) {
       feedback = parsedUsage.error;
       continue;
@@ -187,6 +180,7 @@ export async function runPlanner(
       ctx,
       repoPath,
       writeRules(ctx, `${slug}-usage.yaml`, usageRules),
+      eco.opengrepExcludes,
     );
     if (outcome.ok) {
       usage = outcome.data;
@@ -239,7 +233,7 @@ export async function runPlanner(
 
   const planTask = [
     `Plan the migration of "${pkg}" (installed ${dep.currentVersion}).`,
-    "Decide upgrade or replace, pick a concrete target version that exists on npm, list behavioural differences",
+    `Decide upgrade or replace, pick a concrete target version that exists on ${eco.labels.registry}, list behavioural differences`,
     "for the calls in the usage map, and write model-edit concerns (one per file or tightly coupled group) whose",
     "instructions name each call site and its replacement. Call sites covered by the fix rules need no model edit.",
     "Set feasible=false with reasons if behaviour cannot be preserved.",
@@ -262,8 +256,9 @@ export async function runPlanner(
     });
     planModel = result.model;
     planInputs = result.inputs;
-    const target = await npmRegistryInfo(result.output.target.name);
-    if (!target) planFeedback = `package "${result.output.target.name}" does not exist on npm`;
+    const target = await eco.registryInfo(result.output.target.name);
+    if (!target)
+      planFeedback = `package "${result.output.target.name}" does not exist on ${eco.labels.registry}`;
     else if (!target.versionExists(result.output.target.version))
       planFeedback = `version ${result.output.target.version} of ${result.output.target.name} does not exist; latest is ${target.latestVersion}`;
     else draft = result.output;
@@ -275,7 +270,7 @@ export async function runPlanner(
       };
       book.unverified(
         "unresolved",
-        `Planner target could not be confirmed on npm: ${planFeedback}`,
+        `Planner target could not be confirmed on ${eco.labels.registry}: ${planFeedback}`,
         "registry check failed",
       );
     }
@@ -325,6 +320,7 @@ export function finalizePlan(ctx: RunContext, input: FinalizePlanInput): Planner
   const planModel = input.model;
   const planInputs = input.inputs;
   const pkg = dep.name;
+  const eco = ecosystemFor(findings.toolchain);
   // 3. Concerns in the fixed order the Migrator commits them.
   const usageFiles = new Set(usage.map((s) => s.file));
   const concerns: Concern[] = [];
@@ -333,8 +329,8 @@ export function finalizePlan(ctx: RunContext, input: FinalizePlanInput): Planner
       id: "toolchain",
       kind: "toolchain",
       title: "add a minimal lint configuration",
-      files: ["eslint.config.mjs"],
-      instructions: "Add a minimal ESLint flat config using @eslint/js recommended rules.",
+      files: eco.lintConcern.files,
+      instructions: eco.lintConcern.instructions,
     });
   concerns.push({
     id: "dependency",
@@ -343,7 +339,7 @@ export function finalizePlan(ctx: RunContext, input: FinalizePlanInput): Planner
       draft.strategy === "replace"
         ? `replace ${pkg} with ${draft.target.name}@${draft.target.version}`
         : `upgrade ${pkg} to ${draft.target.version}`,
-    files: ["package.json", "package-lock.json"],
+    files: eco.planManifestFiles(findings.toolchain),
     instructions: `${draft.strategy} ${pkg} -> ${draft.target.name}@${draft.target.version}`,
   });
   if (fixRules)
@@ -385,7 +381,7 @@ export function finalizePlan(ctx: RunContext, input: FinalizePlanInput): Planner
     "maintenance-problem",
     `\`${pkg}\` ranks with risk score ${dep.score}${dep.risk.deprecated ? " and is deprecated" : ""}`,
     {
-      url: `https://registry.npmjs.org/${pkg}`,
+      url: eco.registryUrl(pkg),
     },
   );
   book.recommended(
