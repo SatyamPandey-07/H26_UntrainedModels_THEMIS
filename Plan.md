@@ -15,13 +15,16 @@ Decisions confirmed with the user:
 - **Target repo:** a fork of [SatyamPandey-07/WorkSphere](https://github.com/SatyamPandey-07/WorkSphere)
   (Next.js 16, npm, Jest, ESLint, Node 22). Replaces the earlier `examples/demo-target` fixture.
 - **Sandbox:** Docker on the `ubuntu-latest` runner (Docker preinstalled).
-- **Distribution (installable by any repo owner):**
-  - **GitHub App (public, "Any account")** backed by one small hosted Probot server. The server only receives
-    events, enforces limits, dispatches the pipeline and opens the draft PR and Check Run as the App. It holds the
-    App private key; owners never see it.
-  - **Themis Action** (`action.yml` in this repo): the heavy pipeline runs on the **owner's own Actions runners**,
-    started by a one-file workflow the owner adds, using the owner's own `GROQ_API_KEY` secret.
-  - **Claude Code plugin** distributed from this repo as a plugin marketplace.
+- **Distribution: install-only, zero config.**
+  - **GitHub App:** a repo owner clicks *Install* and is done. No workflow file, no secrets, no config file. The
+    App scans on install, opens a Dependency Dashboard issue, and migrates when the owner ticks a box or
+    comments `/themis <pkg>`.
+  - **Claude Code plugin:** a developer runs `/plugin install` and is done. In plugin mode **Claude Code itself is
+    the reasoning model** (it follows the stage skills), so no API key is needed; the core CLI does every
+    deterministic step.
+  - **Where work runs:** a small webhook server (Probot on Vercel serverless) receives events and sends a
+    `repository_dispatch` to the **Themis runner workflow** in a repository we own. The pipeline runs on our
+    GitHub Actions runners with our `GROQ_API_KEY` and the App's private key, so owners provide nothing.
 - **Pushing:** commits are pushed only when the user says so.
 
 Standing rules: no test files in this repo, no test runs unless asked, lint/type errors always fixed, minimal
@@ -37,10 +40,9 @@ plugin/             Claude Code plugin (thin shell over core)
 skills/             15 agentskills.io skill folders (shared by core, app, plugin)
 docker/             sandbox Dockerfile
 scripts/            install-tools.sh (pinned opengrep, osv-scanner, trivy; run on the Actions runner)
-action.yml          Themis Action (composite) used by owners' workflows
-templates/          themis.yml workflow owners copy into .github/workflows/
+.github/workflows/  themis-runner.yml: the pipeline, triggered by repository_dispatch from the App server
 .claude-plugin/     marketplace.json so developers can `/plugin marketplace add` this repo
-render.yaml         hosting blueprint for the Probot server
+apps/github-app/vercel.json  serverless deployment of the webhook server
 ```
 
 ## Progress
@@ -156,51 +158,82 @@ used by all surfaces. CLI: `themis scan`, `themis plan <pkg>`, `themis run <pkg>
 **Gate (PRD):** one dependency verified end to end on the WorkSphere fork via a `workflow_dispatch` run before
 steps 13–14.
 
-### 13. GitHub App, Themis Action and owner workflow (`apps/github-app/`, `action.yml`, `templates/themis.yml`)
-**Owner install flow:** install the public App on a repo → copy `templates/themis.yml` to `.github/workflows/` →
-add the `GROQ_API_KEY` Actions secret. Nothing else.
-**Themis Action** (composite): set up Node 22 → install pinned tools (`scripts/install-tools.sh`) → build core →
-`themis run <pkg>` (or `scan`) on the checked-out repo → push `themis/<dep>-<date>` with the workflow's
-`GITHUB_TOKEN` (`contents: write`) → upload `.themis/runs/<id>` as artifact `themis-capsule`.
-**Owner workflow** triggers: `workflow_dispatch` (inputs: `package`, `mode`, sent by the App or by hand) and a
-weekly `schedule` scan. It never runs on `pull_request`, so fork PRs never see secrets.
-**Probot server** (hosted; Render free tier via `render.yaml`, smee for local dev):
-- `issue_comment` `/themis <pkg>` and `issues.labeled` `themis` → check limits (one open Themis PR per dependency,
-  `THEMIS_MAX_OPEN_PRS` cap) → react/acknowledge → dispatch the owner workflow.
-- `workflow_run.completed` for `themis.yml` → download `themis-capsule` → open a **draft** PR from the pushed branch
-  with the capsule PR body, labels `themis` + `ai-generated` → Check Run with conclusion and line annotations →
-  signed alert webhook (`pr_opened` / `run_completed` / `run_failed`, retried once, never fails the run).
-- If the workflow file or secret is missing, comment install instructions instead of failing silently.
-**App permissions:** Contents, Pull requests, Checks, Issues, Actions = Read and write; Metadata = Read.
-**Events:** Issue comment, Issues, Workflow run. Documented in `app.yml` (manifest).
+### 13. GitHub App: webhook server, runner workflow, automatic UX (`apps/github-app/`, `.github/workflows/themis-runner.yml`)
 
-### 14. Claude Code plugin and READMEs (`plugin/`, `.claude-plugin/marketplace.json`, all `README.md`)
-Plugin with `/themis scan|plan|run <pkg>` commands calling the core CLI on the developer's checkout, plus the stage
-skills. This repo is a marketplace: `/plugin marketplace add SatyamPandey-07/H26_UntrainedModels_THEMIS` →
-`/plugin install themis@themis`. READMEs (root + core + github-app + plugin) written with `readmeskill`, including
-the three-step owner install guide and Mermaid architecture; checker passing.
+**Owner experience (zero config)**
+1. Owner installs the App on one or more repositories. Nothing else.
+2. `installation.created` / `installation_repositories.added` → automatic **scan** of each repo (Scout only).
+3. Themis opens or updates one **Dependency Dashboard** issue per repo: ranked dependencies with risk signals
+   and a checkbox per dependency (`- [ ] Migrate moment`). Repos Themis cannot handle yet (no `package.json`,
+   unsupported language) get a short dashboard saying so instead of silence.
+4. Owner ticks a box (`issues.edited` on the dashboard), comments `/themis <pkg>`, or adds the `themis` label to an
+   issue naming a package → migration run → **draft PR** authored by `<app>[bot]` with the capsule body, labels
+   `themis` + `ai-generated`, a Check Run with line annotations, and a dashboard update linking the PR.
+5. Weekly re-scan (scheduled runner job over all installations) refreshes every dashboard.
+
+**Automatic decisions (no prompts, sensible defaults)**
+- Language/toolchain, package manager, test and lint commands: detected (`toolchain-detect`).
+- Default branch: read from the API; Themis only ever reads it.
+- Migration target and strategy (upgrade vs replace): chosen by the Planner, stated in the PR with confidence.
+- Auto-migrate: only the top-ranked dependency **with a known vulnerability or deprecation**, at most one per
+  week per repo; everything else waits for a tick. Limits: one open Themis PR per dependency, 3 per repo.
+- Optional `.github/themis.yml` lets owners override (ignore list, auto-migrate off, schedule); never required.
+- Private repositories run only when the runner repository is private (no logs or artifacts of private code in a
+  public repo); otherwise the dashboard explains why the run was skipped.
+
+**Webhook server** (`apps/github-app/`, Probot `createNodeMiddleware`, deployed to Vercel free tier; smee for
+local development): verifies signatures, applies limits, replies with an acknowledgement, and sends
+`repository_dispatch` (`themis-run`, payload: repo, installation id, mode, package, trigger issue) to the runner
+repo. Stateless; state lives in the dashboard issue and run artifacts.
+
+**Runner workflow** (`themis-runner.yml`, in a runner repo we own; this repo by default):
+- `prepare` job (App key): mint an installation token scoped to the target repo, read-only → clone the default
+  branch → upload source as an artifact. Token is not passed on.
+- `pipeline` job (`GROQ_API_KEY` only, no App key): install tools, run Scout → Planner → Migrator ⇄ Verifier →
+  Clio. Repository code executes only inside Docker sandboxes, which receive no secrets.
+- `publish` job (App key, no repo code executed): mint a write token → push `themis/<dep>-<date>` → draft PR →
+  Check Run → dashboard update → signed alert webhook. On failure, the dashboard records the failed run.
+
+**App permissions** (target repos): Contents, Pull requests, Checks, Issues = Read and write; Metadata = Read.
+No Actions, Workflows, Secrets or Administration access is requested from owners.
+**Events:** Installation, Installation repositories, Issues, Issue comment. Documented in `app.yml`.
+
+### 14. Claude Code plugin (zero config) and READMEs (`plugin/`, `.claude-plugin/marketplace.json`, `README.md`s)
+Install: `/plugin marketplace add SatyamPandey-07/H26_UntrainedModels_THEMIS` → `/plugin install themis@themis`.
+- `/themis` with no arguments: detect the repo, scan, print the ranked dashboard, and recommend the top item.
+- `/themis migrate` with no package: migrates the recommended dependency; `/themis migrate <pkg>` for a specific one.
+- Claude is the model: the plugin's skills are the same 15 skills, and Claude performs the model steps (rule
+  authoring, plan, edits, probe choice). Deterministic steps are core CLI subcommands with JSON in/out:
+  `themis scout`, `themis map --rules`, `themis branch`, `themis verify`, `themis capsule`. If `GROQ_API_KEY` is
+  set, `themis run` can do everything headless instead.
+- Output: a local branch and `.themis/` capsule, never a push. Docker is used when available; without it the
+  verifier runs tests on the host and the capsule marks sandbox isolation as UNVERIFIED.
+READMEs (root + core + github-app + plugin) written with `readmeskill`: one-click install for owners, plugin install
+for developers, maintainer section for hosting the server and runner; Mermaid architecture; checker passing.
 
 ### 15. End-to-end verification — install on the WorkSphere fork like an owner would
-Using only the owner install flow on the fork: install the App, add `templates/themis.yml`, add `GROQ_API_KEY`.
-(a) Run the workflow with `mode=scan` → `themis-capsule` artifact with the ranked findings. (b) Comment
-`/themis <top-ranked package>` on an issue → App acknowledges → workflow runs on the fork's runner → branch
-`themis/<pkg>-<date>` → draft PR authored by the App with labels and capsule body → Check Run with annotations;
-every EXECUTED claim links to an existing log; no write to `main`.
+Only action on the fork: **install the App**. Expect, with no other setup: (a) a runner run for the scan and a
+Dependency Dashboard issue with ranked findings; (b) tick the top dependency → runner run → branch
+`themis/<pkg>-<date>` → draft PR by `<app>[bot]` with labels and capsule body → Check Run with annotations →
+dashboard links the PR; every EXECUTED claim links to an existing log; no write to `main`. Plugin check: install
+the plugin in a scratch Claude Code session on a clone and run `/themis` (on the developer's machine, by choice).
 
 ## Manual steps for the user (I'll prompt at the right step)
 
 - [x] 1. **Docker socket:** no longer needed; sandboxes run on Actions runners.
-- [x] 2. **smee channel:** no longer needed; Probot runs inside Actions (harmless if already created).
+- [x] 2. **smee channel:** used only for local development of the webhook server; production uses Vercel.
 - [x] 3. **Register GitHub App:** done by the user. Re-check at step 13: public ("Any account"), permissions and
-   events as listed in step 13, webhook URL pointing at the hosted server (smee URL during development).
+   events exactly as in step 13 (no Actions permission), webhook URL = smee during development, Vercel later.
 - [x] 4. **Fork + install (step 15):** fork the demo-target repo to your account, install the App on the fork only.
 - [ ] 5. **Alerts (optional):** create a webhook receiver (e.g. a webhook.site URL) → `ALERT_WEBHOOK_URL`.
 - [x] 6. **Push access:** local `gh`/git switched to `ayushsshukla` (write access to this repo).
-- [ ] 7. **Fork Actions:** enable Actions on the fork, then disable every inherited WorkSphere workflow so only
-   `themis.yml` runs.
-- [ ] 8. **Fork secret:** `GROQ_API_KEY` in the fork's Actions secrets (owner-side, like any installer).
-- [ ] 9. **Host the Probot server:** deploy `render.yaml` on Render (free) with `APP_ID`, `PRIVATE_KEY`,
-   `WEBHOOK_SECRET`; set the App's webhook URL to the Render URL.
+- [ ] 7. **Runner secrets (this repo, maintainers only):** `GROQ_API_KEY`, `THEMIS_APP_ID`, `THEMIS_APP_PRIVATE_KEY`
+   in Actions secrets of the runner repo. Owners never add secrets.
+- [ ] 8. **Deploy the webhook server:** Vercel project from `apps/github-app` with `APP_ID`, `PRIVATE_KEY`,
+   `WEBHOOK_SECRET`, `RUNNER_REPO`; point the App's webhook URL at it. The App is also installed on the runner repo,
+   so the server dispatches runs with an installation token (`repository_dispatch` needs Contents write only).
+- [ ] 9. **Install the App on the WorkSphere fork** (the only owner-side step). Fork Actions stay disabled; nothing
+   runs on the fork's runners.
 
 ## Verification
 
