@@ -251,3 +251,123 @@ the plugin in a scratch Claude Code session on a clone and run `/themis` (on the
   scanners, Docker or the target repo is checked through a workflow run on the fork.
 - Final: step 15 end to end, with the success metrics from the PRD checked in the produced capsule:
   verified-claim rate 100%, baseline recorded before judgement, 0 unreviewed regressions, call-site coverage reported.
+
+## Remaining work: publish the GitHub App and plugin
+
+### Remaining progress
+
+- [ ] R1. Finish phase 12 check (CLI scan and plan)
+- [ ] R2. GitHub layer: dashboard, limits, dispatch, publish
+- [ ] R3. Webhook server (Probot on Vercel)
+- [ ] R4. Runner workflow on Actions
+- [ ] R5. PRIVACY.md and App README
+- [ ] R6. Manual setup: credentials, secrets, Vercel, installs
+- [ ] R7. End-to-end proof on the WorkSphere fork
+- [ ] R8. Claude Code plugin
+- [ ] R9. GitHub Marketplace listing
+
+### Architecture of the install flow
+
+```text
+owner installs App ──► GitHub webhook ──► Vercel (Probot, apps/github-app/api)
+                                            │ verify signature, limits, ack comment
+                                            ▼ repository_dispatch "themis-run" (installation token on runner repo)
+                       SatyamPandey-07/H26_UntrainedModels_THEMIS  .github/workflows/themis-runner.yml
+                         prepare  (App token, contents:read)  clone target → artifact
+                         pipeline (GROQ_API_KEY only)          build core, install tools, themis scan|run, Docker
+                         publish  (App token, write)           push branch, draft PR, Check Run, dashboard, alert
+```
+
+### Steps
+
+On approval, `Plan.md` gets these steps appended as a tracked checklist (R1–R9) and is committed; each step is
+ticked in the commit that completes it.
+
+#### R1. Finish phase 12 check (local, light)
+`themis scan` and `themis plan` through `packages/core/dist/cli.js` on the scratchpad fixture with the key
+exported. Tick phase 12 in `Plan.md`.
+
+#### R2. GitHub layer (`apps/github-app/src/`)
+New workspace package `@themis/github-app` (Probot 14, `@octokit/rest`, `@octokit/auth-app`, imports
+`@themis/core`). Pure modules shared by the server and the publish job:
+- `dashboard.ts`: render the Dependency Dashboard issue from `findings.json` (hidden marker
+  `<!-- themis:dashboard -->`, ranked table, one `- [ ] Migrate <pkg>` checkbox per dependency, linked open PRs,
+  last-scan time and run link); parse newly ticked boxes from `issues.edited` (`changes.body.from` vs body).
+- `limits.ts`: one open Themis PR per dependency (label `themis` + head `themis/<slug>-*`), max
+  `THEMIS_MAX_OPEN_PRS` per repo, auto-migrate at most once per 7 days, private target refused while the runner
+  repo is public; optional `.github/themis.yml` (ignore list, `autoMigrate`, schedule) parsed with zod.
+- `dispatch.ts`: send `repository_dispatch` (`themis-run`, payload: repo, installation_id, mode, package,
+  issue_number, trigger) to `RUNNER_REPO` using the App's installation on the runner repo.
+- `publish.ts` (CLI entry used by the publish job): push branch from the pipeline's git bundle, commit the
+  capsule to `.themis/<slug>/capsule.md` on the branch, open the draft PR (body from `pr-body.md`, labels
+  `themis` + `ai-generated`, created if missing), Check Run on the head SHA (conclusion + ≤50 annotations from
+  `check-run.json`), comment on the trigger issue, update the dashboard, send `pr_opened` alert via
+  `sendAlert`. For scan runs: create/update the dashboard only. Reuse `capsuleRepoPath`, `sendAlert`,
+  `recommendDependency` from `@themis/core`.
+
+#### R3. Webhook server (`apps/github-app/src/app.ts`, `apps/github-app/api/github/webhooks.ts`)
+Probot app function, deployed with `createNodeMiddleware` as a Vercel function (`vercel.json`); `smee` script for
+local dev. Handlers (must answer within GitHub's 10 s, so they only validate and dispatch):
+- `installation.created`, `installation_repositories.added` → dispatch a `scan` per repo (cap 20 per event).
+- `issues.edited` on the dashboard by a human → dispatch `run` for each newly ticked package (limits apply).
+- `issue_comment.created` `/themis <pkg>` or `/themis` (recommended) → short acknowledgement comment, dispatch `run`.
+- `issues.labeled` `themis` → package from title/body, dispatch `run`.
+- `marketplace_purchase.*` → log; on `cancelled` mark the account so further dispatches are refused.
+- Ignore events from bots and from the runner repo itself.
+`app.yml` documents permissions (Contents, Pull requests, Checks, Issues RW; Metadata R) and events.
+
+#### R4. Runner workflow (`.github/workflows/themis-runner.yml`)
+Triggers: `repository_dispatch` (`themis-run`), weekly `schedule`, `workflow_dispatch` (manual test inputs).
+`concurrency: themis-${repo}-${package}`. Jobs:
+- `prepare`: `actions/create-github-app-token` scoped to the target repo with `permission-contents: read`;
+  refuse private targets when the runner repo is public; `git clone --filter=blob:none`; upload as artifact.
+- `pipeline` (only `GROQ_API_KEY`): Node 22, pnpm install + build core, `scripts/install-tools.sh`, Docker
+  available on `ubuntu-latest`; `themis scan|run --json`; upload `.themis/runs/<id>` and a `git bundle` of the
+  `themis/*` branch.
+- `publish`: App token with write permissions; `node apps/github-app/dist/publish.js`. Never executes target code.
+- `rescan` (schedule only): list installations with `@octokit/auth-app`, dispatch `scan` for repos that have a
+  dashboard issue.
+Run artifacts retained 14 days.
+
+#### R5. Docs for owners and maintainers
+`PRIVACY.md` (data read, stored, Groq as subprocessor, artifact retention, deletion on uninstall), and
+`apps/github-app/README.md` (owner install = one click; maintainer setup: secrets, Vercel, runner repo) plus
+root README status update — all via `readmeskill` with the checker passing.
+
+#### R6. Manual setup (user / Satyam, guided)
+1. App: generate private key + webhook secret; confirm *Any account*, permissions and events from R3.
+2. Runner repo Actions secrets (admin needed): `THEMIS_APP_ID`, `THEMIS_APP_PRIVATE_KEY`, `GROQ_API_KEY`.
+3. Vercel: import repo, root `apps/github-app`, env `APP_ID`, `PRIVATE_KEY`, `WEBHOOK_SECRET`, `RUNNER_REPO`;
+   set the App's webhook URL to `https://<project>.vercel.app/api/github/webhooks`.
+4. Install the App on the runner repo and on the WorkSphere fork.
+
+#### R7. End-to-end proof on the WorkSphere fork (phase 15)
+Install only → dashboard issue appears with ranked dependencies → tick the top one → runner run → draft PR by
+`<app>[bot]` with capsule body, labels and Check Run annotations → dashboard links the PR; every EXECUTED claim
+has a log; `main` untouched. This is the first real run of Docker, Opengrep and the scanners: fix what breaks
+(WorkSphere jest config, Prisma postinstall in the sandbox, run time) and re-run.
+
+#### R8. Claude Code plugin (phase 14)
+- `.claude-plugin/marketplace.json` at the repo root; `plugin/.claude-plugin/plugin.json`; `plugin/commands/themis.md`
+  (`/themis`, `/themis migrate [pkg]`); `plugin/skills/` synced from `skills/` by `pnpm plugin:sync`.
+- Zero install: core CLI bundled with esbuild into `plugin/bin/themis.mjs` (committed artifact, rebuilt by
+  `pnpm plugin:build`).
+- Claude as the model when `GROQ_API_KEY` is absent: CLI subcommands with JSON in/out — `scan --no-llm`,
+  `map <pkg> [--rules file]`, `plan --from <draft.json>` (validates, adds AI-RECOMMENDED claims with model
+  `claude-code`), `branch <pkg>`, `commit-concern`, `verify`, `capsule`. With a key, `run` does everything headless.
+- Confirm current plugin/marketplace manifest format with the `claude-code-guide` agent before writing it.
+- `plugin/README.md` via `readmeskill`.
+
+#### R9. GitHub Marketplace listing (after R7 passes)
+Logo, feature card and screenshots from the R7 demo (images via the `brandkit` skill or real screenshots);
+listing copy; free plan; privacy (`PRIVACY.md`) and support (Issues) links; Marketplace webhook = Vercel URL;
+accept the developer agreement and *Submit for review*. Until approval, share `https://github.com/apps/<slug>`.
+
+### Verification for remaining work
+
+- Per step: `pnpm lint`, `pnpm typecheck`, `pnpm skills:validate`; README checker for any README.
+- R2/R3 locally without network side effects: dashboard render/parse round-trip and limit decisions on fixture
+  payloads; Probot handlers fed recorded webhook JSON with a stubbed Octokit (scratchpad only, no test files).
+- R4: `workflow_dispatch` scan of the WorkSphere fork on the runner; artifacts contain `findings.json`.
+- R7 is the acceptance test: install-only flow produces the dashboard and a verified draft PR.
+- R8: in a scratch Claude Code session on a clone, `/plugin install`, `/themis` prints the ranking.
