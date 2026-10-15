@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@octokit/rest": "22.0.1",
-    "@themis/core": "workspace:*"
+    "@themis/core": "workspace:*",
+    "probot": "14.3.2"
   }
 }

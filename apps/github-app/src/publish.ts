@@ -64,6 +64,22 @@ async function ensureLabels(octokit: Octokit, owner: string, repo: string): Prom
   }
 }
 
+/** Repositories with Issues turned off have no dashboard; the run still publishes its pull request. */
+async function tryDashboard(
+  run: () => Promise<{ number: number; url: string }>,
+): Promise<{ number: number; url: string } | undefined> {
+  try {
+    return await run();
+  } catch (err) {
+    const status = (err as { status?: number }).status;
+    if (status === 410 || status === 404) {
+      console.log("issues are disabled on this repository; dashboard skipped");
+      return undefined;
+    }
+    throw err;
+  }
+}
+
 async function upsertDashboard(
   octokit: Octokit,
   owner: string,
@@ -150,23 +166,19 @@ async function main(): Promise<void> {
   }
 
   if (mode === "scan") {
-    const dash = await upsertDashboard(
-      octokit,
-      owner,
-      repo,
-      findings as Findings,
-      await openThemisPrs(octokit, owner, repo),
-      runUrl,
-      result.recommended,
+    const prs = await openThemisPrs(octokit, owner, repo);
+    const dash = await tryDashboard(() =>
+      upsertDashboard(octokit, owner, repo, findings as Findings, prs, runUrl, result.recommended),
     );
-    await comment(
-      octokit,
-      owner,
-      repo,
-      issueNumber && issueNumber !== dash.number ? issueNumber : undefined,
-      `Scan finished. Ranked dependencies are on the [Dependency Dashboard](${dash.url}).`,
-    );
-    console.log(`dashboard: ${dash.url}`);
+    if (dash && issueNumber && issueNumber !== dash.number)
+      await comment(
+        octokit,
+        owner,
+        repo,
+        issueNumber,
+        `Scan finished. Ranked dependencies are on the [Dependency Dashboard](${dash.url}).`,
+      );
+    console.log(dash ? `dashboard: ${dash.url}` : "scan finished without a dashboard");
     return;
   }
 
@@ -278,16 +290,12 @@ async function main(): Promise<void> {
     issueNumber,
     `Opened draft pull request #${pr.number} for \`${dep}\`: **${capsule.verdict}** (confidence: ${capsule.confidence}). Call sites covered: ${capsule.summary.callSitesCovered} of ${capsule.summary.callSites}.`,
   );
-  if (findings)
-    await upsertDashboard(
-      octokit,
-      owner,
-      repo,
-      findings,
-      await openThemisPrs(octokit, owner, repo),
-      runUrl,
-      result.recommended,
+  if (findings) {
+    const prs = await openThemisPrs(octokit, owner, repo);
+    await tryDashboard(() =>
+      upsertDashboard(octokit, owner, repo, findings, prs, runUrl, result.recommended),
     );
+  }
 
   const alert = await sendAlert(
     {

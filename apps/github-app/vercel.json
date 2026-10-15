@@ -1,0 +1,7 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "pnpm --filter @themis/github-app... build",
+  "functions": {
+    "api/github/webhooks.ts": { "maxDuration": 10 }
+  }
+}
