@@ -4,8 +4,9 @@ import { z } from "zod";
 import { ClaimBook } from "../evidence/claims.js";
 import type { LlmClient } from "../llm/client.js";
 import type { RunContext } from "../run/context.js";
-import { logEvent, resolveRunPath, writeJson } from "../run/context.js";
-import type { PreparedRef, ProbeRequest, ProbeResponse, Sandbox } from "../sandbox/sandbox.js";
+import { hasJson, logEvent, readJson, resolveRunPath, writeJson } from "../run/context.js";
+import type { ProbeRequest, ProbeResponse, Sandbox } from "../sandbox/sandbox.js";
+import type { Claim } from "../schema/claim.js";
 import type {
   Findings,
   MigrationPlan,
@@ -73,65 +74,41 @@ function normalizeBody(body: string): string {
   }
 }
 
-/** Minos: builds baseline and candidate identically, runs the same checks, and judges only the delta. Holds the veto. */
-export async function runVerifier(
-  ctx: RunContext,
-  llm: LlmClient | undefined,
-  input: VerifierInput,
-): Promise<VerifierResult> {
-  const { findings, plan, migration, sandbox, attempt } = input;
-  const book = new ClaimBook("minos");
+export type Side = "baseline" | "candidate";
+
+/** One side's results, written by `runVerifierSide` and read by `runVerifierJudge`. */
+const SideReport = z.object({
+  side: z.enum(["baseline", "candidate"]),
+  result: z.custom<SideResult>(),
+  passingTests: z.array(z.string()),
+  scope: z.string(),
+  lintLabel: z.string().optional(),
+  claims: z.array(z.custom<Claim>()),
+});
+type SideReport = z.infer<typeof SideReport>;
+
+interface SharedCommands {
+  candidateCommit: string;
+  changed: string[];
+  changedSource: string[];
+  testCmd?: string;
+  scope: string;
+  testMounts: Record<string, string>;
+  lint?: { command: string; label: string };
+}
+
+/** Commands both sides run, derived only from the branch, so parallel jobs agree without talking to each other. */
+async function sharedCommands(input: VerifierInput): Promise<SharedCommands> {
+  const { findings, migration } = input;
   const toolchain = findings.toolchain;
   const eco = ecosystemFor(toolchain);
   const worktree = migration.worktreePath;
   const candidateCommit = await headCommit(worktree);
-  const vetoReasons: string[] = [];
-  const logTails: VerifierFeedback["logTails"] = [];
-  logEvent(
-    ctx,
-    `minos: verifying ${migration.branch} (${candidateCommit.slice(0, 7)}) against ${findings.baseCommit.slice(0, 7)}, attempt ${attempt}`,
-  );
-
-  if (!sandbox.isolated)
-    book.unverified(
-      "unresolved",
-      "Verification ran on the host without the Docker sandbox: no network cut, resource limits or read-only source.",
-      "Docker unavailable on this machine",
-    );
-
-  // 1. Identical builds. Baseline is recorded first so pre-existing failures are never blamed on the branch.
-  const baseline = await sandbox.prepare(ctx, "baseline", findings.baseCommit);
-  const candidate = await sandbox.prepare(ctx, "candidate", candidateCommit);
-  book.executed(
-    "executed-results",
-    `Baseline install (${findings.baseRef} @ ${findings.baseCommit.slice(0, 7)}) exited ${baseline.install.exitCode}`,
-    baseline.install,
-  );
-  book.executed(
-    "executed-results",
-    `Candidate install (${migration.branch} @ ${candidateCommit.slice(0, 7)}) exited ${candidate.install.exitCode}`,
-    candidate.install,
-  );
-  if (candidate.install.exitCode !== 0 && baseline.install.exitCode === 0) {
-    vetoReasons.push(
-      `Candidate dependency install fails while the baseline install succeeds (see ${candidate.install.logPath}).`,
-    );
-    logTails.push({ logPath: candidate.install.logPath, tail: readLogTail(ctx, candidate.install.logPath) });
-  }
-  const bothBuilt = baseline.install.exitCode === 0 && candidate.install.exitCode === 0;
-
   const changed = await changedFiles(worktree, findings.baseCommit);
   const changedSource = changed.filter((f) => eco.sourceFile.test(f) && !migration.keptTests.includes(f));
-  const testMounts = Object.fromEntries(migration.keptTests.map((f) => [join(worktree, f), f]));
-
-  // 2. Tests: same command on both sides; characterization tests are mounted read-only into the baseline.
-  let baseTests: TestRun | undefined;
-  let candTests: TestRun | undefined;
-  let candPassing: string[] = [];
-  const newFailures: string[] = [];
-  const fixedFailures: string[] = [];
-  if (bothBuilt && (toolchain.testRunner || toolchain.testCommand)) {
-    const full = process.env.THEMIS_FULL_TESTS === "1";
+  const full = process.env.THEMIS_FULL_TESTS === "1";
+  let testCmd: string | undefined;
+  if (toolchain.testRunner || toolchain.testCommand) {
     // Ecosystems without a "related tests" runner option (Python) resolve related test files themselves.
     const selected = eco.relatedTestFiles
       ? [
@@ -141,59 +118,229 @@ export async function runVerifier(
           ]),
         ]
       : migration.keptTests;
-    const cmd = full
+    testCmd = full
       ? eco.testCommand(toolchain, [])
       : eco.testCommand(toolchain, selected, { related: changedSource });
-    const run = async (
-      ref: PreparedRef,
-      mounts: Record<string, string>,
-    ): Promise<{ run: TestRun; passing: string[] }> => {
-      const r = await sandbox.exec(ctx, ref, cmd, { label: "tests", mounts, timeoutMs: 30 * 60_000 });
-      const p = eco.parseTestOutput(r.stdout, r.exitCode);
-      return {
-        run: {
-          command: cmd,
-          exitCode: r.exitCode,
-          passed: p.passed,
-          failed: p.failed,
-          total: p.total,
-          failingTests: p.failingTests,
-          logPath: r.logPath,
-        },
-        passing: p.passingTests,
-      };
-    };
-    const b = await run(baseline, testMounts);
-    const c = await run(candidate, {});
-    baseTests = b.run;
-    candTests = c.run;
-    candPassing = c.passing;
-    newFailures.push(...c.run.failingTests.filter((t) => !b.run.failingTests.includes(t)));
-    fixedFailures.push(...b.run.failingTests.filter((t) => !c.run.failingTests.includes(t)));
-    const scope = full
+  }
+  const lintable = changedSource.filter((f) => eco.sourceFile.test(f));
+  const lintInvocation = lintable.length > 0 ? eco.lintCommand(toolchain, lintable) : undefined;
+  return {
+    candidateCommit,
+    changed,
+    changedSource,
+    testCmd,
+    scope: full
       ? "full test suite"
-      : `tests related to ${changedSource.length} changed file(s) plus ${migration.keptTests.length} characterization test file(s)`;
-    book.executed("executed-results", `Baseline ${scope}: ${b.run.passed} passed, ${b.run.failed} failed`, {
-      command: cmd,
-      exitCode: b.run.exitCode,
-      logPath: b.run.logPath,
+      : `tests related to ${changedSource.length} changed file(s) plus ${migration.keptTests.length} characterization test file(s)`,
+    testMounts: Object.fromEntries(migration.keptTests.map((f) => [join(worktree, f), f])),
+    lint: lintInvocation ? { command: lintInvocation.command, label: lintInvocation.label } : undefined,
+  };
+}
+
+const sideFile = (side: Side, attempt: number) => `verify-${side}-a${attempt}.json`;
+const PROBES_FILE = "probes.json";
+
+/** Minos chooses black-box probes once per run so both sides send identical requests. */
+export async function planProbes(
+  ctx: RunContext,
+  llm: LlmClient | undefined,
+  input: VerifierInput,
+): Promise<ProbeRequest[]> {
+  if (hasJson(ctx, PROBES_FILE)) return readJson(ctx, PROBES_FILE, z.array(z.custom<ProbeRequest>()));
+  const { findings, plan, migration } = input;
+  const toolchain = findings.toolchain;
+  const eco = ecosystemFor(toolchain);
+  let requests: ProbeRequest[] = [];
+  if (toolchain.startCommand && toolchain.port && llm && process.env.THEMIS_NO_DOCKER !== "1") {
+    const routeFiles = listFiles(migration.worktreePath, ".", 3000)
+      .filter((f) => /(routes?|api|server|app)\b/.test(f) && eco.sourceFile.test(f))
+      .slice(0, 60);
+    const choice = await runAgent(ctx, llm, {
+      agent: "minos",
+      label: `probes-a${input.attempt}`,
+      task: "Choose up to 6 HTTP probes that reach code using the migrated dependency. Use fixed inputs. Only GET or small JSON POST.",
+      data: {
+        "usage-map.json": JSON.stringify(plan.usage, null, 2),
+        "route-files.txt": routeFiles.join("\n"),
+      },
+      output: ProbeChoice,
+      outputDescription: "Submit the probes.",
+      maxSteps: 10,
     });
-    book.executed("executed-results", `Candidate ${scope}: ${c.run.passed} passed, ${c.run.failed} failed`, {
-      command: cmd,
-      exitCode: c.run.exitCode,
-      logPath: c.run.logPath,
+    requests = choice.output.probes as ProbeRequest[];
+  }
+  writeJson(ctx, PROBES_FILE, requests);
+  return requests;
+}
+
+/**
+ * Minos, one side: builds the commit in its own sandbox and runs the shared test, lint, security and probe
+ * commands. Baseline and candidate can run in parallel jobs; `runVerifierJudge` compares them.
+ */
+export async function runVerifierSide(
+  ctx: RunContext,
+  input: VerifierInput,
+  side: Side,
+  probes: ProbeRequest[] = [],
+): Promise<SideReport> {
+  const { findings, migration, sandbox, attempt } = input;
+  const toolchain = findings.toolchain;
+  const eco = ecosystemFor(toolchain);
+  const shared = await sharedCommands(input);
+  // Separate claim and log numbering per side, so reports from parallel jobs merge without collisions.
+  const book = new ClaimBook("minos", (side === "baseline" ? 100 : 200) + attempt * 1000);
+  ctx.seq = Math.max(ctx.seq, (side === "baseline" ? 3000 : 6000) + attempt * 10_000);
+  const commit = side === "baseline" ? findings.baseCommit : shared.candidateCommit;
+  const ref = side === "baseline" ? findings.baseRef : migration.branch;
+  logEvent(ctx, `minos: ${side} sandbox for ${ref} @ ${commit.slice(0, 7)}, attempt ${attempt}`);
+
+  const prepared = await sandbox.prepare(ctx, side, commit);
+  book.executed(
+    "executed-results",
+    `${side === "baseline" ? "Baseline" : "Candidate"} install (${ref} @ ${commit.slice(0, 7)}) exited ${prepared.install.exitCode}`,
+    prepared.install,
+  );
+  const built = prepared.install.exitCode === 0;
+
+  let tests: TestRun | undefined;
+  let passingTests: string[] = [];
+  if (built && shared.testCmd) {
+    const r = await sandbox.exec(ctx, prepared, shared.testCmd, {
+      label: "tests",
+      mounts: side === "baseline" ? shared.testMounts : {},
+      timeoutMs: 30 * 60_000,
     });
-    if (b.run.failed > 0)
+    const p = eco.parseTestOutput(r.stdout, r.exitCode);
+    tests = {
+      command: shared.testCmd,
+      exitCode: r.exitCode,
+      passed: p.passed,
+      failed: p.failed,
+      total: p.total,
+      failingTests: p.failingTests,
+      logPath: r.logPath,
+    };
+    passingTests = p.passingTests;
+    book.executed(
+      "executed-results",
+      `${side === "baseline" ? "Baseline" : "Candidate"} ${shared.scope}: ${p.passed} passed, ${p.failed} failed`,
+      { command: shared.testCmd, exitCode: r.exitCode, logPath: r.logPath },
+    );
+  }
+
+  let lint: SideResult["lint"];
+  if (built && shared.lint && (side === "candidate" || !toolchain.lintConfigProposed)) {
+    const r = await sandbox.exec(ctx, prepared, shared.lint.command, {
+      label: "lint",
+      timeoutMs: 15 * 60_000,
+    });
+    lint = {
+      command: shared.lint.command,
+      exitCode: r.exitCode,
+      violations: r.exitCode === 0 ? 0 : countLintViolations(r.stdout + r.stderr),
+      logPath: r.logPath,
+    };
+  }
+
+  // Security rescan of this side's tree (lockfile based; no project code executes).
+  const dir = side === "baseline" ? ctx.repoPath : migration.worktreePath;
+  const ids = new Set<string>();
+  let first: { command: string; logPath: string; exitCode: number } | undefined;
+  for (const scanner of eco.scanners) {
+    const out = await scanner.scan(ctx, dir);
+    if (!out.ok) continue;
+    first ??= { command: out.command, logPath: out.logPath, exitCode: out.exitCode };
+    for (const v of dedupeVulnerabilities(out.data)) ids.add(`${v.packageName}:${v.id}`);
+  }
+  const security = first
+    ? {
+        findings: ids.size,
+        ids: [...ids].sort(),
+        command: first.command,
+        logPath: first.logPath,
+        exitCode: first.exitCode,
+      }
+    : undefined;
+
+  let probeResponses: ProbeResponse[] = [];
+  let probeLogPath: string | undefined;
+  if (built && probes.length > 0 && toolchain.startCommand && toolchain.port && sandbox.kind === "docker") {
+    const out = await sandbox.probe(
+      ctx,
+      prepared,
+      { command: toolchain.startCommand, port: toolchain.port },
+      probes,
+    );
+    probeResponses = out.responses;
+    probeLogPath = out.result.logPath;
+  }
+
+  const report: SideReport = {
+    side,
+    result: {
+      ref,
+      commit,
+      install: { exitCode: prepared.install.exitCode, logPath: prepared.install.logPath },
+      tests,
+      lint,
+      security,
+      probes: probeResponses,
+      probeLogPath,
+    },
+    passingTests,
+    scope: shared.scope,
+    lintLabel: shared.lint?.label,
+    claims: book.claims,
+  };
+  writeJson(ctx, sideFile(side, attempt), report);
+  return report;
+}
+
+/** Minos, verdict: compares the two sides, rescans usage, measures coverage and holds the veto. */
+export async function runVerifierJudge(ctx: RunContext, input: VerifierInput): Promise<VerifierResult> {
+  const { findings, plan, migration, sandbox, attempt } = input;
+  const toolchain = findings.toolchain;
+  const eco = ecosystemFor(toolchain);
+  const worktree = migration.worktreePath;
+  const book = new ClaimBook("minos", 300 + attempt * 1000);
+  const base = readJson(ctx, sideFile("baseline", attempt), SideReport);
+  const cand = readJson(ctx, sideFile("candidate", attempt), SideReport);
+  const vetoReasons: string[] = [];
+  const logTails: VerifierFeedback["logTails"] = [];
+  const claims = [...base.claims, ...cand.claims];
+
+  if (!sandbox.isolated)
+    book.unverified(
+      "unresolved",
+      "Verification ran on the host without the Docker sandbox: no network cut, resource limits or read-only source.",
+      "Docker unavailable on this machine",
+    );
+
+  const b = base.result;
+  const c = cand.result;
+  if (c.install.exitCode !== 0 && b.install.exitCode === 0) {
+    vetoReasons.push(
+      `Candidate dependency install fails while the baseline install succeeds (see ${c.install.logPath}).`,
+    );
+    logTails.push({ logPath: c.install.logPath, tail: readLogTail(ctx, c.install.logPath) });
+  }
+
+  const newFailures: string[] = [];
+  const fixedFailures: string[] = [];
+  if (b.tests && c.tests) {
+    newFailures.push(...c.tests.failingTests.filter((x) => !b.tests?.failingTests.includes(x)));
+    fixedFailures.push(...b.tests.failingTests.filter((x) => !c.tests?.failingTests.includes(x)));
+    if (b.tests.failed > 0)
       book.executed(
         "gaps",
-        `${b.run.failed} test(s) already fail on the baseline; they are not counted against the branch`,
-        { command: cmd, exitCode: b.run.exitCode, logPath: b.run.logPath },
+        `${b.tests.failed} test(s) already fail on the baseline; they are not counted against the branch`,
+        b.tests,
       );
     if (newFailures.length > 0) {
       vetoReasons.push(
         `${newFailures.length} test(s) pass on the baseline and fail on the candidate: ${newFailures.slice(0, 10).join("; ")}.`,
       );
-      logTails.push({ logPath: c.run.logPath, tail: readLogTail(ctx, c.run.logPath) });
+      logTails.push({ logPath: c.tests.logPath, tail: readLogTail(ctx, c.tests.logPath) });
     }
   } else if (!toolchain.testRunner && !toolchain.testCommand) {
     book.unverified(
@@ -204,84 +351,49 @@ export async function runVerifier(
   } else {
     book.unverified(
       "unresolved",
-      "Tests were not run because an install failed.",
+      "Tests were not run on both sides because an install failed.",
       "baseline or candidate install failed",
     );
   }
 
-  // 3. Lint on the changed source files, same command on both sides.
-  let baseLint: SideResult["lint"];
-  let candLint: SideResult["lint"];
   let lintDelta = 0;
-  const lintable = changedSource.filter((f) => eco.sourceFile.test(f));
-  const lintInvocation = bothBuilt && lintable.length > 0 ? eco.lintCommand(toolchain, lintable) : undefined;
-  if (lintInvocation) {
-    const cmd = lintInvocation.command;
-    const lint = async (ref: PreparedRef) => {
-      const r = await sandbox.exec(ctx, ref, cmd, { label: "lint", timeoutMs: 15 * 60_000 });
-      return {
-        command: cmd,
-        exitCode: r.exitCode,
-        violations: r.exitCode === 0 ? 0 : countLintViolations(r.stdout + r.stderr),
-        logPath: r.logPath,
-      };
-    };
-    candLint = await lint(candidate);
-    if (!toolchain.lintConfigProposed) {
-      baseLint = await lint(baseline);
-      lintDelta = candLint.violations - baseLint.violations;
-      book.executed(
-        "executed-results",
-        `${lintInvocation.label} on changed files: baseline ${baseLint.violations}, candidate ${candLint.violations} violation(s)`,
-        candLint,
-      );
-      if (lintDelta > 0)
-        vetoReasons.push(
-          `The branch adds ${lintDelta} lint violation(s) in changed files (see ${candLint.logPath}).`,
-        );
-    } else {
-      book.executed(
-        "executed-results",
-        `${lintInvocation.label} (config added by Themis) reports ${candLint.violations} violation(s) in changed files`,
-        candLint,
-      );
-      book.unverified(
-        "gaps",
-        "The baseline had no linter, so the lint delta could not be computed.",
-        "no baseline lint config",
-      );
-    }
-  }
-
-  // 4. Security rescan on both trees (lockfile based; no project code executes).
-  const scanSide = async (dir: string) => {
-    const ids = new Set<string>();
-    let first: { command: string; logPath: string; exitCode: number } | undefined;
-    for (const scanner of eco.scanners) {
-      const out = await scanner.scan(ctx, dir);
-      if (!out.ok) continue;
-      first ??= { command: out.command, logPath: out.logPath, exitCode: out.exitCode };
-      for (const v of dedupeVulnerabilities(out.data)) ids.add(`${v.packageName}:${v.id}`);
-    }
-    return first
-      ? {
-          findings: ids.size,
-          ids: [...ids].sort(),
-          command: first.command,
-          logPath: first.logPath,
-          exitCode: first.exitCode,
-        }
-      : undefined;
-  };
-  const baseSec = await scanSide(ctx.repoPath);
-  const candSec = await scanSide(worktree);
-  const newSecurityIds = baseSec && candSec ? candSec.ids.filter((i) => !baseSec.ids.includes(i)) : [];
-  const resolvedSecurityIds = baseSec && candSec ? baseSec.ids.filter((i) => !candSec.ids.includes(i)) : [];
-  if (baseSec && candSec) {
+  if (c.lint && b.lint) {
+    lintDelta = c.lint.violations - b.lint.violations;
     book.executed(
       "executed-results",
-      `Security rescan: baseline ${baseSec.findings}, candidate ${candSec.findings} finding(s); ${resolvedSecurityIds.length} resolved, ${newSecurityIds.length} new`,
-      candSec,
+      `${cand.lintLabel ?? "Lint"} on changed files: baseline ${b.lint.violations}, candidate ${c.lint.violations} violation(s)`,
+      c.lint,
+    );
+    if (lintDelta > 0)
+      vetoReasons.push(
+        `The branch adds ${lintDelta} lint violation(s) in changed files (see ${c.lint.logPath}).`,
+      );
+  } else if (c.lint) {
+    book.executed(
+      "executed-results",
+      `${cand.lintLabel ?? "Lint"} (config added by Themis) reports ${c.lint.violations} violation(s) in changed files`,
+      c.lint,
+    );
+    book.unverified(
+      "gaps",
+      "The baseline had no linter, so the lint delta could not be computed.",
+      "no baseline lint config",
+    );
+  }
+
+  const newSecurityIds =
+    b.security && c.security ? c.security.ids.filter((i) => !b.security?.ids.includes(i)) : [];
+  const resolvedSecurityIds =
+    b.security && c.security ? b.security.ids.filter((i) => !c.security?.ids.includes(i)) : [];
+  if (b.security && c.security) {
+    book.executed(
+      "executed-results",
+      `Security rescan: baseline ${b.security.findings}, candidate ${c.security.findings} finding(s); ${resolvedSecurityIds.length} resolved, ${newSecurityIds.length} new`,
+      {
+        command: "security rescan (npm audit / OSV-Scanner / Trivy or pip-audit)",
+        exitCode: c.security.exitCode,
+        logPath: c.security.logPath,
+      },
     );
     if (newSecurityIds.length > 0)
       vetoReasons.push(`The branch introduces vulnerabilities: ${newSecurityIds.join(", ")}.`);
@@ -292,10 +404,10 @@ export async function runVerifier(
       "scanners unavailable",
     );
 
-  // 5. Rescan usage: after a replacement the old package must be gone.
-  const usageRule = plan.rules.find((r) => !r.hasFix);
-  let remaining: string[] = [];
+  // After a replacement the old package must be gone.
   if (plan.strategy === "replace") {
+    const usageRule = plan.rules.find((r) => !r.hasFix);
+    let remaining: string[] = [];
     if (usageRule && (await opengrepAvailable(ctx))) {
       const out = await opengrepMapper.map(
         ctx,
@@ -312,9 +424,8 @@ export async function runVerifier(
         );
       }
     } else {
-      const files = listFiles(worktree, ".", 5000);
       remaining = eco
-        .regexUsageMap(worktree, files, plan.dependency)
+        .regexUsageMap(worktree, listFiles(worktree, ".", 5000), plan.dependency)
         .filter((s) => s.symbol === "import")
         .map((s) => `${s.file}:${s.line}`);
       book.unverified(
@@ -329,52 +440,23 @@ export async function runVerifier(
       );
   }
 
-  // 6. Black-box probes, only when the app has a known start command and port.
-  const baseProbes: ProbeResponse[] = [];
-  const candProbes: ProbeResponse[] = [];
   const probeMismatches: Verification["delta"]["probeMismatches"] = [];
-  let baseProbeLog: string | undefined;
-  let candProbeLog: string | undefined;
-  if (bothBuilt && toolchain.startCommand && toolchain.port && sandbox.kind === "docker" && llm) {
-    const routeFiles = listFiles(worktree, ".", 3000)
-      .filter((f) => /(routes?|api|server|app)\b/.test(f) && eco.sourceFile.test(f))
-      .slice(0, 60);
-    const choice = await runAgent(ctx, llm, {
-      agent: "minos",
-      label: `probes-a${attempt}`,
-      task: "Choose up to 6 HTTP probes that reach code using the migrated dependency. Use fixed inputs. Only GET or small JSON POST.",
-      data: {
-        "usage-map.json": JSON.stringify(plan.usage, null, 2),
-        "route-files.txt": routeFiles.join("\n"),
-      },
-      output: ProbeChoice,
-      outputDescription: "Submit the probes.",
-      maxSteps: 10,
-    });
-    const requests = choice.output.probes as ProbeRequest[];
-    const service = { command: toolchain.startCommand, port: toolchain.port };
-    const b = await sandbox.probe(ctx, baseline, service, requests);
-    const c = await sandbox.probe(ctx, candidate, service, requests);
-    baseProbes.push(...b.responses);
-    candProbes.push(...c.responses);
-    baseProbeLog = b.result.logPath;
-    candProbeLog = c.result.logPath;
-    for (const req of requests) {
-      const x = b.responses.find((r) => r.path === req.path && r.method === req.method);
-      const y = c.responses.find((r) => r.path === req.path && r.method === req.method);
-      if (!x || !y) continue;
-      if (x.status !== y.status || normalizeBody(x.body) !== normalizeBody(y.body))
+  if (c.probes.length > 0) {
+    for (const y of c.probes) {
+      const x = b.probes.find((r) => r.path === y.path && r.method === y.method);
+      if (x && (x.status !== y.status || normalizeBody(x.body) !== normalizeBody(y.body)))
         probeMismatches.push({
-          path: `${req.method} ${req.path}`,
+          path: `${y.method} ${y.path}`,
           baseline: `${x.status} ${x.body.slice(0, 500)}`,
           candidate: `${y.status} ${y.body.slice(0, 500)}`,
         });
     }
-    book.executed(
-      "executed-results",
-      `Black-box probes: ${requests.length} sent to both apps, ${probeMismatches.length} mismatch(es)`,
-      c.result,
-    );
+    if (c.probeLogPath)
+      book.executed(
+        "executed-results",
+        `Black-box probes: ${c.probes.length} sent to both apps, ${probeMismatches.length} mismatch(es)`,
+        { command: "themis probes", exitCode: 0, logPath: c.probeLogPath },
+      );
     if (probeMismatches.length > 0)
       vetoReasons.push(
         `Black-box probes differ between baseline and candidate: ${probeMismatches.map((m) => m.path).join(", ")}.`,
@@ -387,13 +469,12 @@ export async function runVerifier(
     );
   }
 
-  // 7. Call-site coverage: every call site of the migrated dependency is affected by the change, edited or not.
-  // A site is covered when a passing candidate test names it as file:line.
+  // Every call site of the migrated dependency is affected by the change, edited or not.
   const touched = plan.usage.filter((s) => s.symbol !== "import");
-  const covered = touched.filter((s) => candPassing.some((name) => name.includes(eco.siteTag(s))));
+  const covered = touched.filter((s) => cand.passingTests.some((name) => name.includes(eco.siteTag(s))));
   const uncovered = touched.filter((s) => !covered.includes(s)).map((s) => `${s.file}:${s.line} ${s.symbol}`);
   const coverageText = `Call-site coverage: ${covered.length} of ${touched.length} affected call sites exercised by passing characterization tests`;
-  if (candTests) book.executed("executed-results", coverageText, candTests);
+  if (c.tests) book.executed("executed-results", coverageText, c.tests);
   else book.unverified("executed-results", coverageText, "no tests ran on the candidate");
   for (const u of uncovered.slice(0, 50))
     book.unverified(
@@ -404,49 +485,45 @@ export async function runVerifier(
 
   const passed = vetoReasons.length === 0;
   for (const r of vetoReasons)
-    book.executed("executed-results", `Veto: ${r}`, candTests ?? candidate.install);
+    book.executed(
+      "executed-results",
+      `Veto: ${r}`,
+      c.tests ?? { command: "install", exitCode: c.install.exitCode, logPath: c.install.logPath },
+    );
 
   const verification: Verification = VerificationSchema.parse({
-    baseline: {
-      ref: findings.baseRef,
-      commit: findings.baseCommit,
-      install: { exitCode: baseline.install.exitCode, logPath: baseline.install.logPath },
-      tests: baseTests,
-      lint: baseLint,
-      security: baseSec,
-      probes: baseProbes,
-      probeLogPath: baseProbeLog,
-    },
-    candidate: {
-      ref: migration.branch,
-      commit: candidateCommit,
-      install: { exitCode: candidate.install.exitCode, logPath: candidate.install.logPath },
-      tests: candTests,
-      lint: candLint,
-      security: candSec,
-      probes: candProbes,
-      probeLogPath: candProbeLog,
-    },
+    baseline: b,
+    candidate: c,
     delta: { newFailures, fixedFailures, lintDelta, newSecurityIds, resolvedSecurityIds, probeMismatches },
     coverage: { covered: covered.length, total: touched.length, uncovered },
     passed,
     vetoReasons,
     attempt,
-    claims: book.claims,
+    claims: [...claims, ...book.claims],
   });
+  const feedback: VerifierFeedback = {
+    reasons: vetoReasons,
+    failingTests: newFailures,
+    logTails: logTails.map((l) => ({ ...l, tail: l.tail.slice(-8000) })),
+  };
   writeJson(ctx, `verification-attempt-${attempt}.json`, verification);
   writeJson(ctx, "verification.json", verification);
+  writeJson(ctx, "feedback.json", feedback);
   logEvent(
     ctx,
     `minos: ${passed ? "passed" : `vetoed (${vetoReasons.length} reason(s))`}; coverage ${covered.length}/${touched.length}`,
   );
+  return { verification, feedback };
+}
 
-  return {
-    verification,
-    feedback: {
-      reasons: vetoReasons,
-      failingTests: newFailures,
-      logTails: logTails.map((l) => ({ ...l, tail: l.tail.slice(-8000) })),
-    },
-  };
+/** Minos, sequential: both sides one after the other, then the verdict (used by `themis run` and the plugin). */
+export async function runVerifier(
+  ctx: RunContext,
+  llm: LlmClient | undefined,
+  input: VerifierInput,
+): Promise<VerifierResult> {
+  const probes = await planProbes(ctx, llm, input);
+  await runVerifierSide(ctx, input, "baseline", probes);
+  await runVerifierSide(ctx, input, "candidate", probes);
+  return runVerifierJudge(ctx, input);
 }
