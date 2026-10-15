@@ -117,3 +117,20 @@ export async function exportCommit(ctx: RunContext, repoPath: string, commit: st
     cwd: repoPath,
   });
 }
+
+/** Files modified or created in a working tree (staged or not), relative to its root. */
+export async function dirtyFiles(cwd: string): Promise<string[]> {
+  const out = await gitQuery(cwd, ["status", "--porcelain", "--untracked-files=all"]);
+  return out
+    .split("\n")
+    .filter(Boolean)
+    .map((l) => l.slice(3).replace(/^"|"$/g, ""))
+    .map((p) => (p.includes(" -> ") ? (p.split(" -> ").pop() as string) : p));
+}
+
+export async function branchExists(cwd: string, branch: string): Promise<boolean> {
+  return gitQuery(cwd, ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`]).then(
+    () => true,
+    () => false,
+  );
+}
