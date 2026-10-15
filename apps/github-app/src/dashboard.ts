@@ -51,6 +51,7 @@ export function renderDashboard(findings: Findings, links: DashboardLinks = {}, 
   });
   return [
     DASHBOARD_MARKER,
+    embedDashboardData(findings, limit),
     "Themis ranked this repository's direct dependencies by maintenance risk and opened a proposal issue for each",
     "top candidate. Comment `/themis plan` on a proposal to see the plan, or `/themis migrate` to act on it; ticking a",
     "box here also starts a migration. Themis migrates on its own branch, verifies against the default branch in a",
@@ -102,4 +103,84 @@ export function proposalMarker(pkg: string): string {
 
 export function proposalPackage(body: string | null | undefined): string | undefined {
   return /<!-- themis:proposal package="([^"]+)" -->/.exec(body ?? "")?.[1];
+}
+
+/** Machine-readable copy of the dashboard, for the web app. Base64 so the JSON can never close the comment. */
+export interface DashboardData {
+  scannedAt: string;
+  baseRef: string;
+  baseCommit: string;
+  dependencies: Array<{
+    name: string;
+    currentVersion: string;
+    latestVersion?: string;
+    dev: boolean;
+    score: number;
+    vulnerabilities: number;
+    deprecated: boolean;
+    ageDays?: number;
+    importingFiles?: number;
+    transitiveCount: number;
+    rationale?: string;
+  }>;
+}
+
+function embedDashboardData(findings: Findings, limit: number): string {
+  const data: DashboardData = {
+    scannedAt: new Date().toISOString(),
+    baseRef: findings.baseRef,
+    baseCommit: findings.baseCommit,
+    dependencies: findings.dependencies.slice(0, limit * 2).map((d) => ({
+      name: d.name,
+      currentVersion: d.currentVersion,
+      latestVersion: d.risk.latestVersion,
+      dev: d.dev,
+      score: d.score,
+      vulnerabilities: d.risk.vulnerabilities.length,
+      deprecated: d.risk.deprecated,
+      ageDays: d.risk.ageDays,
+      importingFiles: d.importingFiles,
+      transitiveCount: d.risk.transitiveCount,
+      rationale: d.rationale,
+    })),
+  };
+  return `<!-- themis:data ${Buffer.from(JSON.stringify(data)).toString("base64")} -->`;
+}
+
+/** Reads the embedded data back; for dashboards written before the data block existed, parses the rows. */
+export function readDashboardData(body: string | null | undefined): DashboardData | undefined {
+  const text = body ?? "";
+  const m = /<!-- themis:data ([A-Za-z0-9+/=]+) -->/.exec(text);
+  if (m?.[1]) {
+    try {
+      return JSON.parse(Buffer.from(m[1], "base64").toString("utf8")) as DashboardData;
+    } catch {
+      // fall through to the row parser
+    }
+  }
+  if (!isDashboard(text)) return undefined;
+  const rows = [
+    ...text.matchAll(/^- \[[ xX]\] Migrate `([^`]+)`[^·]*· score ([\d.]+) · (\S+)( \(dev\))? · ([^\n]*)$/gm),
+  ];
+  return {
+    scannedAt: "",
+    baseRef: "",
+    baseCommit: "",
+    dependencies: rows.map((r) => {
+      const signals = r[5] ?? "";
+      return {
+        name: r[1] as string,
+        score: Number(r[2]),
+        currentVersion: r[3] as string,
+        dev: Boolean(r[4]),
+        vulnerabilities: Number(/(\d+) vulnerabilit/.exec(signals)?.[1] ?? 0),
+        deprecated: /deprecated/.test(signals),
+        latestVersion: /latest (\S+?)(,|$)/.exec(signals)?.[1],
+        importingFiles: /not imported/.test(signals)
+          ? 0
+          : Number(/used in (\d+) file/.exec(signals)?.[1] ?? NaN) || undefined,
+        transitiveCount: 0,
+      };
+    }),
+  };
 }

@@ -14,5 +14,19 @@
     "probot": "14.3.2",
     "yaml": "2.9.1",
     "zod": "4.6.7"
+  },
+  "exports": {
+    "./app": {
+      "types": "./dist/app.d.ts",
+      "import": "./dist/app.js"
+    },
+    "./dashboard": {
+      "types": "./dist/dashboard.d.ts",
+      "import": "./dist/dashboard.js"
+    },
+    "./config": {
+      "types": "./dist/config.d.ts",
+      "import": "./dist/config.js"
+    }
   }
 }
