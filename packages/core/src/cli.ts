@@ -3,7 +3,8 @@ import { resolve } from "node:path";
 import { Command } from "commander";
 import { writeCapsule } from "./capsule/writer.js";
 import { loadConfig } from "./config.js";
-import { recommendDependency, runThemis } from "./orchestrator.js";
+import { runThemis } from "./orchestrator.js";
+import { recommendDependency } from "./recommend.js";
 import type { RunOutcome } from "./orchestrator.js";
 import { hasJson, loadRun, readJson } from "./run/context.js";
 import {

@@ -18,12 +18,21 @@ import {
   capsuleCommitMessage,
   capsuleRepoPath,
   pullRequestTitle,
+  rankCandidates,
   recommendDependency,
   sendAlert,
 } from "@themis/core";
 import type { CheckRunOutput } from "@themis/core";
 import { readRepoConfig } from "./config.js";
-import { DASHBOARD_TITLE, dependencySlug, isDashboard, renderDashboard } from "./dashboard.js";
+import { renderPlanComment, upsertProposals } from "./proposals.js";
+import {
+  DASHBOARD_TITLE,
+  dependencySlug,
+  isDashboard,
+  proposalMarker,
+  proposalPackage,
+  renderDashboard,
+} from "./dashboard.js";
 
 /** Writes a step output when running inside GitHub Actions. */
 function setOutput(name: string, value: string): void {
@@ -104,6 +113,7 @@ async function upsertDashboard(
   openPrs: Record<string, { number: number; url: string }>,
   runUrl?: string,
   recommended?: string,
+  proposals: Record<string, { number: number; url: string }> = {},
 ): Promise<{ number: number; url: string }> {
   const issues = await octokit.paginate(octokit.issues.listForRepo, {
     owner,
@@ -113,7 +123,7 @@ async function upsertDashboard(
     per_page: 100,
   });
   const existing = issues.find((i) => !i.pull_request && isDashboard(i.body));
-  const body = renderDashboard(findings, { openPrs, runUrl, recommended });
+  const body = renderDashboard(findings, { openPrs, runUrl, recommended, proposals });
   if (existing) {
     await octokit.issues.update({ owner, repo, issue_number: existing.number, body });
     return { number: existing.number, url: existing.html_url };
@@ -154,6 +164,27 @@ async function comment(
   if (issue) await octokit.issues.createComment({ owner, repo, issue_number: issue, body });
 }
 
+/** The open proposal issue for a package, if Themis opened one. */
+async function findProposal(
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+  pkg: string,
+): Promise<number | undefined> {
+  try {
+    const open = await octokit.paginate(octokit.issues.listForRepo, {
+      owner,
+      repo,
+      state: "open",
+      labels: "themis",
+      per_page: 100,
+    });
+    return open.find((i) => !i.pull_request && proposalPackage(i.body) === pkg)?.number;
+  } catch {
+    return undefined;
+  }
+}
+
 async function main(): Promise<void> {
   const token = env("GITHUB_TOKEN");
   const [owner, repo] = env("TARGET_REPO").split("/") as [string, string];
@@ -188,10 +219,23 @@ async function main(): Promise<void> {
       ...(findings as Findings),
       dependencies: (findings as Findings).dependencies.filter((d) => !config.ignore.includes(d.name)),
     };
-    const recommended = recommendDependency(visible);
+    const candidates = rankCandidates(visible);
+    const recommended = candidates[0] ?? recommendDependency(visible);
     const prs = await openThemisPrs(octokit, owner, repo);
+    // One proposal issue per top candidate; candidates that already have an open Themis PR are skipped.
+    const proposals = repoInfo.has_issues
+      ? await upsertProposals(
+          octokit,
+          owner,
+          repo,
+          candidates.slice(0, config.proposals),
+          candidates.length,
+          runUrl,
+          (d) => Boolean(prs[dependencySlug(d.name)]),
+        )
+      : {};
     const dash = await tryDashboard(() =>
-      upsertDashboard(octokit, owner, repo, visible, prs, runUrl, recommended?.name),
+      upsertDashboard(octokit, owner, repo, visible, prs, runUrl, recommended?.name, proposals),
     );
     if (warning && dash) await comment(octokit, owner, repo, dash.number, warning);
     if (dash && issueNumber && issueNumber !== dash.number)
@@ -200,7 +244,16 @@ async function main(): Promise<void> {
         owner,
         repo,
         issueNumber,
-        `Scan finished. Ranked dependencies are on the [Dependency Dashboard](${dash.url}).`,
+        [
+          `Scan finished. Ranked dependencies are on the [Dependency Dashboard](${dash.url}).`,
+          Object.keys(proposals).length
+            ? `\nThemis opened ${Object.keys(proposals).length} proposal issue(s), one per migration candidate: ${Object.values(
+                proposals,
+              )
+                .map((p) => `#${p.number}`)
+                .join(", ")}. Comment \`/themis plan\` or \`/themis migrate\` on one to continue.`
+            : "",
+        ].join("\n"),
       );
     console.log(dash ? `dashboard: ${dash.url}` : "scan finished without a dashboard");
 
@@ -226,6 +279,25 @@ async function main(): Promise<void> {
     return;
   }
 
+  if (mode === "plan") {
+    const planRaw = readJsonFile<unknown>(join(runDir, "plan.json"));
+    if (!planRaw) throw new Error("plan mode produced no plan.json");
+    const plan = MigrationPlan.parse(planRaw);
+    const body = renderPlanComment(plan, findings, runUrl);
+    const target = issueNumber ?? (await findProposal(octokit, owner, repo, plan.dependency));
+    if (target) await comment(octokit, owner, repo, target, body);
+    else
+      await octokit.issues.create({
+        owner,
+        repo,
+        title: `Themis plan: ${plan.dependency}`,
+        body: `${proposalMarker(plan.dependency)}\n${body}`,
+        labels: ["themis"],
+      });
+    console.log(`plan published for ${plan.dependency}`);
+    return;
+  }
+
   const capsule = Capsule.parse(readJsonFile<unknown>(join(runDir, "capsule.json")));
   const prBody = readFileSync(join(runDir, "pr-body.md"), "utf8");
   const checkRun = readJsonFile<CheckRunOutput>(join(runDir, "check-run.json"));
@@ -234,7 +306,16 @@ async function main(): Promise<void> {
 
   if (!capsule.branch || !bundle || !existsSync(bundle)) {
     // Nothing to push (for example "Not recommended"): publish the capsule where people will see it.
-    const body = `## Themis: ${capsule.verdict} for \`${dep}\`\n\n${capsuleMd.slice(0, 60_000)}${runUrl ? `\n\n[Run log](${runUrl})` : ""}`;
+    const body = [
+      `## Themis: ${capsule.verdict} for \`${dep}\``,
+      "",
+      "No branch was pushed. The capsule below explains why; every claim is tagged by how it was established.",
+      "",
+      "**Next step:** close this issue to accept the finding, or comment `/themis plan` to see the plan again.",
+      "",
+      `<details><summary>Dependency Exit Capsule</summary>\n\n${capsuleMd.slice(0, 55_000)}\n\n</details>`,
+      runUrl ? `\n[Run log](${runUrl})` : "",
+    ].join("\n");
     if (issueNumber) await comment(octokit, owner, repo, issueNumber, body);
     else
       await octokit.issues.create({
@@ -329,13 +410,22 @@ async function main(): Promise<void> {
     });
   }
 
-  await comment(
-    octokit,
-    owner,
-    repo,
-    issueNumber,
-    `Opened draft pull request #${pr.number} for \`${dep}\`: **${capsule.verdict}** (confidence: ${capsule.confidence}). Call sites covered: ${capsule.summary.callSitesCovered} of ${capsule.summary.callSites}.`,
-  );
+  const prComment = [
+    `### Themis opened draft pull request #${pr.number}`,
+    "",
+    `\`${dep}\`: **${capsule.verdict}** · confidence ${capsule.confidence} · call sites covered ${capsule.summary.callSitesCovered} of ${capsule.summary.callSites} · new test failures ${capsule.summary.newTestFailures}`,
+    "",
+    "**Next steps**",
+    "",
+    `1. Review #${pr.number}: the description explains why \`${dep}\` was chosen, what each commit does, and what was verified.`,
+    "2. Check the gaps section; anything listed there was not proven by a test.",
+    "3. When you are satisfied, mark the pull request ready for review and merge it yourself. Themis never merges.",
+    "",
+    "To redo the migration from scratch, close the pull request and comment `/themis migrate` again.",
+  ].join("\n");
+  const proposalIssue = await findProposal(octokit, owner, repo, dep);
+  for (const target of new Set([issueNumber, proposalIssue].filter((n): n is number => Boolean(n))))
+    await comment(octokit, owner, repo, target, prComment);
   if (findings) {
     const prs = await openThemisPrs(octokit, owner, repo);
     await tryDashboard(() =>

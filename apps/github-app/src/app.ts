@@ -1,17 +1,18 @@
 import type { Context, Probot } from "probot";
-import { DASHBOARD_TITLE, dependencySlug, isDashboard, newlyTicked } from "./dashboard.js";
+import { DASHBOARD_TITLE, dependencySlug, isDashboard, newlyTicked, proposalPackage } from "./dashboard.js";
 
 /** Runner repository that executes Themis jobs (`owner/name`); the App must be installed there too. */
 const RUNNER_REPO = process.env.RUNNER_REPO ?? "SatyamPandey-07/H26_UntrainedModels_THEMIS";
 const MAX_OPEN_PRS = Number(process.env.THEMIS_MAX_OPEN_PRS ?? 3);
 const MAX_SCANS_PER_EVENT = 20;
+/** `/themis`, `/themis <pkg>`, `/themis plan [pkg]`, `/themis migrate [pkg]`. Group 1: action, group 2: package. */
 const COMMAND_RE =
-  /^\/themis(?:\s+(?:migrate\s+)?((?:@[a-z0-9~][a-z0-9._~-]*\/)?[a-z0-9~][a-z0-9._~-]*))?\s*$/im;
+  /^\/themis(?:\s+(plan|migrate))?(?:\s+((?:@[a-z0-9~][a-z0-9._~-]*\/)?[a-z0-9~][a-z0-9._~-]*))?\s*$/im;
 const TRUSTED = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
 
 export interface DispatchPayload {
   repository: string;
-  mode: "run" | "scan";
+  mode: "run" | "scan" | "plan";
   package?: string;
   issue_number?: string;
   trigger: string;
@@ -102,7 +103,28 @@ export default (app: Probot): void => {
       });
       return;
     }
-    const pkg = match[1];
+    // On a proposal issue the package can be omitted: `/themis plan`, `/themis migrate`.
+    const pkg = match[2] ?? proposalPackage(issue.body);
+    const mode = match[1] === "plan" ? "plan" : "run";
+    if (mode === "plan") {
+      await context.octokit.rest.reactions
+        .createForIssueComment({ owner, repo, comment_id: comment.id, content: "eyes" })
+        .catch(() => undefined);
+      await context.octokit.rest.issues.createComment({
+        owner,
+        repo,
+        issue_number: issue.number,
+        body: `Themis is mapping every use of ${pkg ? `\`${pkg}\`` : "the recommended dependency"} and will reply here with a migration plan. Nothing will be changed.`,
+      });
+      await dispatchRun(app, {
+        repository: repository.full_name,
+        mode: "plan",
+        package: pkg,
+        issue_number: String(issue.number),
+        trigger: "comment",
+      });
+      return;
+    }
     const limits = await openThemisPrCount(context, owner, repo, pkg);
     if (limits.forPackage) {
       await context.octokit.rest.issues.createComment({
@@ -129,7 +151,7 @@ export default (app: Probot): void => {
       owner,
       repo,
       issue_number: issue.number,
-      body: `Themis is starting a migration run for ${pkg ? `\`${pkg}\`` : "the recommended dependency"}. It will comment here with the result and a draft pull request.`,
+      body: `Themis is migrating ${pkg ? `\`${pkg}\`` : "the recommended dependency"} on its own branch. It will verify the change against the default branch and reply here with a draft pull request and next steps.`,
     });
     await dispatchRun(app, {
       repository: repository.full_name,
@@ -178,7 +200,10 @@ export default (app: Probot): void => {
     const owner = repository.owner.login;
     const repo = repository.name;
     if (!(await senderCanWrite(context, owner, repo, sender.login))) return;
-    const pkg = COMMAND_RE.exec(issue.title)?.[1] ?? /`([^`\s]+)`/.exec(issue.title)?.[1];
+    const pkg =
+      proposalPackage(issue.body) ??
+      COMMAND_RE.exec(issue.title)?.[2] ??
+      /`([^`\s]+)`/.exec(issue.title)?.[1];
     const limits = await openThemisPrCount(context, owner, repo, pkg);
     if (limits.forPackage || limits.total >= MAX_OPEN_PRS) return;
     await context.octokit.rest.issues.createComment({

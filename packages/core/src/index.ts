@@ -30,3 +30,4 @@ export * from "./steps.js";
 export * from "./ecosystems/index.js";
 export * from "./messages.js";
 export * from "./agent-stages.js";
+export * from "./recommend.js";

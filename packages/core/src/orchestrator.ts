@@ -53,8 +53,6 @@ export interface RunOutcome {
 
 import { recommendDependency } from "./recommend.js";
 
-export { recommendDependency };
-
 async function stage<T>(ctx: RunContext, name: StageName, output: string, fn: () => Promise<T>): Promise<T> {
   setStage(ctx, name, "running");
   try {

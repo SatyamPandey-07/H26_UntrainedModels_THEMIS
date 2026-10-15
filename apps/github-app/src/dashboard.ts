@@ -16,6 +16,8 @@ export interface DashboardLinks {
   openPrs?: Record<string, { number: number; url: string }>;
   runUrl?: string;
   recommended?: string;
+  /** Proposal issues keyed by dependency name. */
+  proposals?: Record<string, { number: number; url: string }>;
 }
 
 function signals(d: DependencyFinding): string {
@@ -43,14 +45,17 @@ export function renderDashboard(findings: Findings, links: DashboardLinks = {}, 
   const deps = findings.dependencies.slice(0, limit);
   const rows = deps.map((d) => {
     const pr = links.openPrs?.[dependencySlug(d.name)];
+    const proposal = links.proposals?.[d.name];
     const box = pr ? `- [x] Migrate \`${d.name}\` (draft PR #${pr.number})` : `- [ ] Migrate \`${d.name}\``;
-    return `${box} · score ${d.score} · ${d.currentVersion}${d.dev ? " (dev)" : ""} · ${signals(d)}`;
+    return `${box} · score ${d.score} · ${d.currentVersion}${d.dev ? " (dev)" : ""} · ${signals(d)}${proposal ? ` · proposal #${proposal.number}` : ""}`;
   });
   return [
     DASHBOARD_MARKER,
-    "Themis ranked this repository's direct dependencies by maintenance risk. Tick a box to have Themis migrate",
-    "that dependency on its own branch, verify it against the default branch in a sandbox, and open a draft pull",
-    "request with an evidence capsule. Themis never merges and never writes to the default branch.",
+    "Themis ranked this repository's direct dependencies by maintenance risk and opened a proposal issue for each",
+    "top candidate. Comment `/themis plan` on a proposal to see the plan, or `/themis migrate` to act on it; ticking a",
+    "box here also starts a migration. Themis migrates on its own branch, verifies against the default branch in a",
+    "sandbox, and opens a draft pull request with an evidence capsule. Themis never merges and never writes to the",
+    "default branch.",
     "",
     links.recommended ? `**Recommended next:** \`${links.recommended}\`` : "",
     "",
@@ -88,4 +93,13 @@ export function newlyTicked(before: string, after: string): string[] {
 
 export function isDashboard(body: string | null | undefined): boolean {
   return Boolean(body?.includes(DASHBOARD_MARKER));
+}
+
+/** Hidden marker on a proposal issue; the package is read back when someone comments `/themis plan|migrate`. */
+export function proposalMarker(pkg: string): string {
+  return `<!-- themis:proposal package="${pkg}" -->`;
+}
+
+export function proposalPackage(body: string | null | undefined): string | undefined {
+  return /<!-- themis:proposal package="([^"]+)" -->/.exec(body ?? "")?.[1];
 }

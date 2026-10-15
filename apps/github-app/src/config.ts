@@ -4,8 +4,12 @@ import { z } from "zod";
 
 /** Optional `.github/themis.yml` in a target repository. Every field has a default; the file is never required. */
 export const RepoConfig = z.object({
-  /** Automatically migrate the top-ranked dependency that has a known vulnerability or is deprecated. */
-  autoMigrate: z.boolean().default(true),
+  /**
+   * Automatically migrate the top candidate after a scan. Off by default: Themis proposes, people decide.
+   */
+  autoMigrate: z.boolean().default(false),
+  /** Proposal issues opened after a scan, one per migration candidate. */
+  proposals: z.number().int().min(0).max(10).default(5),
   /** Minimum days between automatic migrations. */
   autoMigrateIntervalDays: z.number().int().min(1).max(365).default(7),
   /** Dependencies Themis must never propose. */
