@@ -56,7 +56,7 @@ apps/github-app/vercel.json  serverless deployment of the webhook server
 - [x] 7. Athena — Planner
 - [x] 8. Docker sandbox (Docker path first exercised on the Actions runner at step 15)
 - [x] 9. Hephaestus — Migrator (characterization-test validation first exercised on the runner at step 15)
-- [ ] 10. Minos — Verifier
+- [x] 10. Minos — Verifier (delta and veto logic checked locally; Docker builds and probes first run on the runner at step 15)
 - [ ] 11. Clio — Capsule Writer and PR report
 - [ ] 12. Hermes — Orchestrator and CLI
 - [ ] 13. GitHub App (Probot)

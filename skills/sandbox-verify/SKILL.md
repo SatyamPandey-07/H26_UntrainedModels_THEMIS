@@ -35,7 +35,8 @@ behavioural difference. A pre-existing baseline failure is never a reason to rej
 
 Your veto is final. The Migrator may retry; it may not overrule you.
 
-## Your task as the model
+## Veto reasons
 
-You receive the computed delta. Write the veto reasons as short factual sentences that name the test,
-file or probe. Do not soften them and do not speculate about causes you were not shown.
+The engine writes veto reasons deterministically as short factual sentences naming the test, file, probe or
+vulnerability ID, so they cannot be softened. The model's only task in this stage is choosing black-box probes
+(see `blackbox-probe-diff`).

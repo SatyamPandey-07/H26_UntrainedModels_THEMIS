@@ -21,3 +21,4 @@ export * from "./agents/planner.js";
 export * from "./sandbox/sandbox.js";
 export * from "./sandbox/tests.js";
 export * from "./agents/migrator.js";
+export * from "./agents/verifier.js";
