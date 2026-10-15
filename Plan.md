@@ -62,6 +62,7 @@ apps/github-app/vercel.json  serverless deployment of the webhook server
 - [ ] 13. GitHub App (Probot)
 - [ ] 14. Claude Code plugin and READMEs
 - [ ] 15. End-to-end verification — fork and run the app
+- [x] 16. Python ecosystem (pip + requirements.txt), additive; Node/npm behaviour unchanged (Docker, pip-audit and the full run first exercised on the runner)
 
 ## Tracking
 
@@ -220,6 +221,24 @@ Dependency Dashboard issue with ranked findings; (b) tick the top dependency →
 `themis/<pkg>-<date>` → draft PR by `<app>[bot]` with labels and capsule body → Check Run with annotations →
 dashboard links the PR; every EXECUTED claim links to an existing log; no write to `main`. Plugin check: install
 the plugin in a scratch Claude Code session on a clone and run `/themis` (on the developer's machine, by choice).
+
+### 16. Python ecosystem — pip + requirements.txt (`packages/core/src/ecosystems/`, `docker/sandbox-python.Dockerfile`)
+Additive. A shared `Ecosystem` interface (`ecosystems/types.ts`) is implemented by `node` (a thin adapter that calls
+the original functions unchanged) and `python`. The agents ask `ecosystemFor(toolchain)` instead of hard-coding npm,
+so a repository with `package.json` runs exactly as before. Ecosystem choice: `package.json` → node, else
+`requirements*.txt` → python; `--ecosystem node|python` or `THEMIS_ECOSYSTEM` overrides.
+- **Detect:** `skills/toolchain-detect/scripts/detect-python.mjs` (Python version, pytest/unittest, ruff/flake8/pylint,
+  Django/FastAPI/Flask start command). `detect.mjs` is untouched.
+- **Read and rank:** requirements parser (extras, markers, hashes, `-r` includes, URL/VCS skipped as gaps); PyPI
+  registry signals (yanked, Inactive classifier, last publish, maintainers, downloads); transitive weight from
+  `requires_dist`; scanners `pip-audit`, OSV-Scanner and Trivy.
+- **Map and migrate:** import-name aliases (`PyYAML`→`yaml`); Opengrep regex import rule plus a regex fallback;
+  in-place requirement edits that keep extras, markers, comments and `--hash` digests, pip-compile regeneration via
+  `uv`; minimal `ruff.toml` concern. Each edit is evidenced by a recorded `git diff`.
+- **Verify:** `python:<ver>-slim-bookworm` sandbox, pytest JUnit XML or unittest parsing, related-test selection,
+  ruff/flake8/pylint delta, call-site coverage through `L<line>_<file>` tags in test names.
+- **Out of scope:** Poetry, uv-managed, Pipenv and pyproject-only dependency declarations; mixed repositories run
+  the primary ecosystem and report the other as a gap.
 
 ## Manual steps for the user (I'll prompt at the right step)
 
