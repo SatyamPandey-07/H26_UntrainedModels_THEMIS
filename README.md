@@ -12,7 +12,7 @@ Dependency migration harness for npm projects: ranks risky dependencies, migrate
 | You are                       | Do this                                                                                                                                                                            |
 | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | A repository owner            | Install the GitHub App: [github.com/apps/themis-migrations](https://github.com/apps/themis-migrations). Nothing else to configure. See the [App guide](apps/github-app/README.md). |
-| A developer using Claude Code | Run `/plugin install themis --marketplace SatyamPandey-07/H26_UntrainedModels_THEMIS`, then `/themis:scan`. See the [plugin guide](plugin/README.md).                              |
+| A developer using Claude Code | Run `/plugin marketplace add SatyamPandey-07/H26_UntrainedModels_THEMIS`, then `/plugin install themis@themis` and `/themis:scan`. See the [plugin guide](plugin/README.md).       |
 | Running the engine yourself   | Follow [Getting started](#getting-started) below.                                                                                                                                  |
 
 ## Overview

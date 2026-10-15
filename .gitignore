@@ -18,3 +18,5 @@ dist/
 .next/
 *.tsbuildinfo
 .vercel/
+# The Claude Code plugin ships its bundled engine; installs come straight from GitHub.
+!plugin/dist/

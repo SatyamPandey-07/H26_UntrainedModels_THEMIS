@@ -1,22 +1,19 @@
 # Themis plugin for Claude Code
 
-Rank risky npm dependencies and migrate one on its own branch, verified against your base branch, from inside
+Rank risky npm and Python (pip) dependencies and migrate one on its own branch, verified against your base branch, from inside
 Claude Code. Claude Code is the model, so no API key is needed. Part of [Themis](../README.md).
 
 ## Install
 
-In Claude Code:
-
-```text
-/plugin install themis --marketplace SatyamPandey-07/H26_UntrainedModels_THEMIS
-```
-
-On older Claude Code versions, add the marketplace first:
+In Claude Code, add this repository as a marketplace, then install the plugin from it:
 
 ```text
 /plugin marketplace add SatyamPandey-07/H26_UntrainedModels_THEMIS
 /plugin install themis@themis
 ```
+
+Run `/reload-plugins` (or start a new session) and the two skills below are available. Contributors who open this
+repository in Claude Code are offered the plugin automatically through `.claude/settings.json`.
 
 ## Usage
 

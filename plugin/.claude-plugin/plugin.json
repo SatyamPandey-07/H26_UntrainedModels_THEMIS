@@ -1,9 +1,11 @@
 {
   "name": "themis",
   "version": "0.1.0",
-  "description": "Rank risky npm dependencies, migrate one on its own branch, verify it against the base branch, and write an evidence capsule. Claude Code is the model; no API key needed.",
-  "author": { "name": "Themis team (H26 Untrained Models)" },
+  "description": "Rank risky npm and Python dependencies, migrate one on its own branch, verify it against the base branch, and write an evidence capsule. Claude Code is the model; no API key needed.",
+  "author": {
+    "name": "Themis team (H26 Untrained Models)"
+  },
   "homepage": "https://github.com/SatyamPandey-07/H26_UntrainedModels_THEMIS",
   "repository": "https://github.com/SatyamPandey-07/H26_UntrainedModels_THEMIS",
-  "keywords": ["dependencies", "migration", "npm", "security", "provenance"]
+  "keywords": ["dependencies", "migration", "npm", "python", "security", "provenance"]
 }

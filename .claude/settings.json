@@ -1,0 +1,13 @@
+{
+  "extraKnownMarketplaces": {
+    "themis": {
+      "source": {
+        "source": "github",
+        "repo": "SatyamPandey-07/H26_UntrainedModels_THEMIS"
+      }
+    }
+  },
+  "enabledPlugins": {
+    "themis@themis": true
+  }
+}

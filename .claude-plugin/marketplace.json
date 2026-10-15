@@ -1,12 +1,14 @@
 {
   "name": "themis",
   "description": "Themis dependency migration tools for Claude Code",
-  "owner": { "name": "Themis team (H26 Untrained Models)" },
+  "owner": {
+    "name": "Themis team (H26 Untrained Models)"
+  },
   "plugins": [
     {
       "name": "themis",
       "source": "./plugin",
-      "description": "Rank risky npm dependencies and migrate one on its own branch with an evidence capsule"
+      "description": "Rank risky npm and Python dependencies and migrate one on its own branch with an evidence capsule"
     }
   ]
 }
