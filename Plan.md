@@ -2,7 +2,7 @@
 
 ## Context
 
-`Themis.pdf` (PRD, 18 pp.) specifies a multi-agent harness that finds risky dependencies, migrates one on
+[`docs/Themis-PRD.pdf`](docs/Themis-PRD.pdf) (PRD, 18 pp.) specifies a multi-agent harness that finds risky dependencies, migrates one on
 its own branch, verifies baseline vs candidate in Docker sandboxes, and opens a draft PR carrying a
 **Dependency Exit Capsule** where every claim is tagged OBSERVED / EXECUTED / AI-RECOMMENDED / UNVERIFIED.
 The repo (`SatyamPandey-07/H26_UntrainedModels_THEMIS`) is empty except a stub README, so this is a greenfield build.
