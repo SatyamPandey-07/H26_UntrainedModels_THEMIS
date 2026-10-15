@@ -52,7 +52,7 @@ apps/github-app/vercel.json  serverless deployment of the webhook server
 - [x] 3. Skills (15, agentskills.io format)
 - [x] 4. Groq LLM client and agent loop
 - [x] 5. Analysis tools and wrappers
-- [ ] 6. Argus — Scout
+- [x] 6. Argus — Scout
 - [ ] 7. Athena — Planner
 - [ ] 8. Docker sandbox
 - [ ] 9. Hephaestus — Migrator

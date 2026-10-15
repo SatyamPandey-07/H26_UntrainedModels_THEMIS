@@ -16,3 +16,4 @@ export * from "./tools/lockfile.js";
 export * from "./tools/opengrep.js";
 export * from "./tools/git.js";
 export * from "./tools/lint.js";
+export * from "./agents/scout.js";
