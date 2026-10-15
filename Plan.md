@@ -261,14 +261,14 @@ fork), triggered by hand; automatic triggers and polish follow.
 
 - [x] R1. Finish phase 12 check (CLI scan and plan)
 - [x] R4a. Runner workflow (`workflow_dispatch`) and publish step: draft PR, Check Run, issue comment, dashboard (live check at R7a)
-- [ ] R6a. Manual: App private key, runner secrets, install the App on the WorkSphere fork
+- [x] R6a. Manual: App private key, runner secrets, install the App on the WorkSphere fork
 - [ ] R7a. First live run on the WorkSphere fork; fix what breaks
-- [ ] R3. Webhook server (Probot on Vercel): `/themis` comments, install-time scan, dashboard ticks
+- [x] R3. Webhook server (Probot on Vercel): `/themis` comments, install-time scan, dashboard ticks (deploy at R6b)
 - [ ] R6b. Manual: deploy to Vercel, point the App webhook at it
-- [ ] R2. Limits and optional `.github/themis.yml` config, weekly rescan
-- [ ] R5. PRIVACY.md and App README
+- [x] R2. Limits and optional `.github/themis.yml` config, weekly rescan
+- [x] R5. PRIVACY.md and App README
 - [ ] R7. Install-only end-to-end proof on the WorkSphere fork
-- [ ] R8. Claude Code plugin
+- [x] R8. Claude Code plugin (validated with `claude plugin validate`)
 - [ ] R9. GitHub Marketplace listing
 
 ### Architecture of the install flow

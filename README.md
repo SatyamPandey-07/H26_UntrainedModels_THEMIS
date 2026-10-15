@@ -6,6 +6,14 @@ Dependency migration harness for npm projects: ranks risky dependencies, migrate
 ![TypeScript](https://img.shields.io/badge/TypeScript-6.0-3178C6?style=flat-square&logo=typescript&logoColor=white)
 ![pnpm](https://img.shields.io/badge/pnpm-10.30-F69220?style=flat-square&logo=pnpm&logoColor=white)
 
+## Install
+
+| You are                       | Do this                                                                                                                                                                            |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A repository owner            | Install the GitHub App: [github.com/apps/themis-migrations](https://github.com/apps/themis-migrations). Nothing else to configure. See the [App guide](apps/github-app/README.md). |
+| A developer using Claude Code | Run `/plugin install themis --marketplace SatyamPandey-07/H26_UntrainedModels_THEMIS`, then `/themis:scan`. See the [plugin guide](plugin/README.md).                              |
+| Running the engine yourself   | Follow [Getting started](#getting-started) below.                                                                                                                                  |
+
 ## Overview
 
 Dependency upgrades get postponed because nobody can see which files a library touches, whether tests cover
@@ -62,12 +70,14 @@ A claim that fails the gate is downgraded to `UNVERIFIED` and listed in the caps
 
 ## Project status
 
-| Component                                                                         | Status                                        |
-| --------------------------------------------------------------------------------- | --------------------------------------------- |
-| Core engine (`packages/core`): Scout, Planner, Migrator, Verifier, Capsule Writer | Implemented                                   |
-| Orchestrator and `themis` CLI                                                     | Implemented                                   |
-| GitHub App (install-only, Dependency Dashboard issue, draft PRs)                  | Not built yet, see [Plan.md](Plan.md) step 13 |
-| Claude Code plugin                                                                | Not built yet, see [Plan.md](Plan.md) step 14 |
+| Component                                                                         | Status                                      |
+| --------------------------------------------------------------------------------- | ------------------------------------------- |
+| Core engine (`packages/core`): Scout, Planner, Migrator, Verifier, Capsule Writer | Implemented                                 |
+| Orchestrator and `themis` CLI, including plugin step commands                     | Implemented                                 |
+| Runner workflow on GitHub Actions (`.github/workflows/themis-runner.yml`)         | Implemented; live runs on a WorkSphere fork |
+| GitHub App webhook server (`apps/github-app`)                                     | Implemented; Vercel deployment pending      |
+| Claude Code plugin and marketplace (`plugin/`, `.claude-plugin/`)                 | Implemented                                 |
+| GitHub Marketplace listing                                                        | Not submitted yet                           |
 
 ## Tech stack
 
@@ -86,20 +96,26 @@ A claim that fails the gate is downgraded to `UNVERIFIED` and listed in the caps
 
 ```text
 .
-├── packages/core/            Themis engine and the `themis` CLI
+├── packages/core/              Themis engine and the `themis` CLI
 │   └── src/
-│       ├── agents/           Scout, Planner, Migrator, Verifier, agent loop, scoped file tools
-│       ├── capsule/          Evidence gate and capsule, PR body and Check Run writer
-│       ├── sandbox/          Docker sandbox, host fallback, test runner adapters
-│       ├── tools/            Scanners, registry, lockfile graph, Opengrep, git, lint
-│       ├── schema/           zod contracts for findings, plan, migration, verification, capsule
-│       ├── orchestrator.ts   Stage sequencing, retries, alerts
-│       └── cli.ts            Command-line entry point
-├── skills/                   15 agent skills (SKILL.md plus scripts, references, assets)
-├── docker/                   Sandbox image definition
-├── scripts/install-tools.sh  Pinned Opengrep, OSV-Scanner and Trivy installer (Linux x86_64)
-├── docs/                     Product requirements and architecture
-└── Plan.md                   Build plan with progress checkboxes
+│       ├── agents/             Scout, Planner, Migrator, Verifier, agent loop, scoped file tools
+│       ├── capsule/            Evidence gate and capsule, PR body and Check Run writer
+│       ├── sandbox/            Docker sandbox, host fallback, test runner adapters
+│       ├── tools/              Scanners, registry, lockfile graph, Opengrep, git, lint
+│       ├── schema/             zod contracts for findings, plan, migration, verification, capsule
+│       ├── orchestrator.ts     Stage sequencing, retries, alerts
+│       ├── steps.ts            Step commands for the Claude Code plugin
+│       └── cli.ts              Command-line entry point
+├── apps/github-app/            Probot webhook server, dashboard, publish and rescan steps (see its README)
+├── plugin/                     Claude Code plugin with the bundled CLI (see its README)
+├── .claude-plugin/             Plugin marketplace manifest
+├── .github/workflows/          Runner workflow that executes every App run
+├── skills/                     15 agent skills (SKILL.md plus scripts, references, assets)
+├── docker/                     Sandbox image definition
+├── scripts/                    Scanner installer and plugin build
+├── docs/                       Product requirements and architecture
+├── PRIVACY.md                  Privacy policy for the App and plugin
+└── Plan.md                     Build plan with progress checkboxes
 ```
 
 ## Getting started
@@ -109,7 +125,7 @@ A claim that fails the gate is downgraded to `UNVERIFIED` and listed in the caps
 - [Node.js](https://nodejs.org/) 22 or later
 - [pnpm](https://pnpm.io/installation) 10.30 (enable with Corepack, below)
 - [Git](https://git-scm.com/)
-- A [Groq API key](https://console.groq.com/keys)
+- A [Groq API key](https://console.groq.com/keys) for `plan` and `run` (the free tier works with the default token budget)
 - Optional, for isolated verification: [Docker](https://docs.docker.com/get-docker/) with a running daemon
 - Optional, for full analysis on Linux x86_64: Opengrep, OSV-Scanner and Trivy via `scripts/install-tools.sh`
 
@@ -149,16 +165,19 @@ The CLI is now available at `packages/core/dist/cli.js`.
 
 ### Environment variables
 
-| Variable               | Required | Description                                                                         | Example                            |
-| ---------------------- | -------- | ----------------------------------------------------------------------------------- | ---------------------------------- |
-| `GROQ_API_KEY`         | Yes      | Groq API key used by every agent                                                    | `your-groq-api-key`                |
-| `GROQ_MODEL`           | No       | Groq model with tool calling                                                        | `openai/gpt-oss-120b` (default)    |
-| `THEMIS_RETRY_CAP`     | No       | Migration retries after a Verifier veto                                             | `2` (default)                      |
-| `THEMIS_MAX_OPEN_PRS`  | No       | Open Themis PRs allowed per repository                                              | `3` (default)                      |
-| `ALERT_WEBHOOK_URL`    | No       | Receives a JSON alert when a run completes or fails                                 | `https://example.com/hooks/themis` |
-| `ALERT_WEBHOOK_SECRET` | No       | Signs alerts in the `x-themis-signature-256` header (HMAC-SHA256)                   | `your-shared-secret`               |
-| `THEMIS_FULL_TESTS`    | No       | Set to `1` to run the full test suite instead of related and characterization tests | `1`                                |
-| `THEMIS_SKILLS_DIR`    | No       | Overrides the location of the `skills/` folder                                      | `/opt/themis/skills`               |
+| Variable                       | Required             | Description                                                                            | Example                            |
+| ------------------------------ | -------------------- | -------------------------------------------------------------------------------------- | ---------------------------------- |
+| `GROQ_API_KEY`                 | For `plan` and `run` | Groq API key used by the agents. `scan` and the plugin's step commands work without it | `your-groq-api-key`                |
+| `GROQ_MODEL`                   | No                   | Groq model with tool calling                                                           | `openai/gpt-oss-120b` (default)    |
+| `THEMIS_RETRY_CAP`             | No                   | Migration retries after a Verifier veto                                                | `2` (default)                      |
+| `THEMIS_MAX_OPEN_PRS`          | No                   | Open Themis PRs allowed per repository                                                 | `3` (default)                      |
+| `ALERT_WEBHOOK_URL`            | No                   | Receives a JSON alert when a run completes or fails                                    | `https://example.com/hooks/themis` |
+| `ALERT_WEBHOOK_SECRET`         | No                   | Signs alerts in the `x-themis-signature-256` header (HMAC-SHA256)                      | `your-shared-secret`               |
+| `THEMIS_FULL_TESTS`            | No                   | Set to `1` to run the full test suite instead of related and characterization tests    | `1`                                |
+| `THEMIS_SKILLS_DIR`            | No                   | Overrides the location of the `skills/` folder                                         | `/opt/themis/skills`               |
+| `THEMIS_PROMPT_TOKEN_BUDGET`   | No                   | Estimated prompt tokens per model request; older tool output is trimmed to fit         | `5000` (default)                   |
+| `THEMIS_MAX_COMPLETION_TOKENS` | No                   | Tokens reserved for each model response                                                | `2500` (default)                   |
+| `THEMIS_REASONING_EFFORT`      | No                   | Reasoning effort for `gpt-oss` models: `low`, `medium` or `high`                       | `low` (default)                    |
 
 Themis reads `.env` from the target repository or its parent directories. When you run it against a repository
 outside this checkout, export the variables first:
