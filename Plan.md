@@ -58,7 +58,7 @@ apps/github-app/vercel.json  serverless deployment of the webhook server
 - [x] 9. Hephaestus — Migrator (characterization-test validation first exercised on the runner at step 15)
 - [x] 10. Minos — Verifier (delta and veto logic checked locally; Docker builds and probes first run on the runner at step 15)
 - [x] 11. Clio — Capsule Writer and PR report
-- [ ] 12. Hermes — Orchestrator and CLI
+- [x] 12. Hermes — Orchestrator and CLI
 - [ ] 13. GitHub App (Probot)
 - [ ] 14. Claude Code plugin and READMEs
 - [ ] 15. End-to-end verification — fork and run the app
@@ -256,7 +256,7 @@ the plugin in a scratch Claude Code session on a clone and run `/themis` (on the
 
 ### Remaining progress
 
-- [ ] R1. Finish phase 12 check (CLI scan and plan)
+- [x] R1. Finish phase 12 check (CLI scan and plan)
 - [ ] R2. GitHub layer: dashboard, limits, dispatch, publish
 - [ ] R3. Webhook server (Probot on Vercel)
 - [ ] R4. Runner workflow on Actions

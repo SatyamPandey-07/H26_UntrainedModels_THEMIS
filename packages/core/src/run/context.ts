@@ -47,7 +47,7 @@ export function createRun(opts: {
   config: ThemisConfig;
 }): RunContext {
   const repoPath = resolve(opts.repoPath);
-  const runId = newRunId(opts.dependency);
+  const runId = newRunId(opts.dependency ?? opts.mode);
   const runDir = join(themisDir(repoPath), "runs", runId);
   const logsDir = join(runDir, "logs");
   mkdirSync(logsDir, { recursive: true });
