@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Themis GitHub App</title>
+  <link rel="icon" type="image/jpeg" href="logo.jpg" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0b0f19;
+      --card-bg: rgba(18, 24, 38, 0.85);
+      --border: rgba(56, 189, 248, 0.2);
+      --accent: #38bdf8;
+      --accent-glow: rgba(56, 189, 248, 0.35);
+      --text: #f1f5f9;
+      --text-muted: #94a3b8;
+      --status-ok: #10b981;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem 1rem;
+      background-image: 
+        radial-gradient(circle at 50% 20%, rgba(56, 189, 248, 0.12) 0%, transparent 50%),
+        radial-gradient(circle at 80% 80%, rgba(99, 102, 241, 0.08) 0%, transparent 40%);
+    }
+
+    .container {
+      max-width: 520px;
+      width: 100%;
+      background: var(--card-bg);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 2.5rem;
+      text-align: center;
+      box-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.6), 0 0 50px -10px var(--accent-glow);
+    }
+
+    .logo-container {
+      margin-bottom: 1.5rem;
+      display: inline-block;
+      position: relative;
+    }
+
+    .logo {
+      width: 110px;
+      height: 110px;
+      border-radius: 24px;
+      object-fit: cover;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4), 0 0 20px rgba(56, 189, 248, 0.25);
+      border: 1px solid rgba(56, 189, 248, 0.3);
+    }
+
+    h1 {
+      font-size: 1.75rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      margin-bottom: 0.5rem;
+      background: linear-gradient(135deg, #ffffff 40%, #38bdf8 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    p.subtitle {
+      color: var(--text-muted);
+      font-size: 0.95rem;
+      line-height: 1.5;
+      margin-bottom: 1.75rem;
+    }
+
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      background: rgba(16, 185, 129, 0.12);
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      color: var(--status-ok);
+      font-size: 0.85rem;
+      font-weight: 500;
+      padding: 0.4rem 0.9rem;
+      border-radius: 9999px;
+      margin-bottom: 2rem;
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background-color: var(--status-ok);
+      box-shadow: 0 0 8px var(--status-ok);
+      animation: pulse 2s infinite ease-in-out;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.5; transform: scale(0.85); }
+    }
+
+    .endpoint-box {
+      background: rgba(0, 0, 0, 0.35);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 12px;
+      padding: 1rem;
+      margin-bottom: 1.5rem;
+      text-align: left;
+    }
+
+    .endpoint-label {
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+      margin-bottom: 0.4rem;
+    }
+
+    .endpoint-path {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.875rem;
+      color: #38bdf8;
+      word-break: break-all;
+    }
+
+    .footer {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      margin-top: 1rem;
+    }
+
+    .footer a {
+      color: #38bdf8;
+      text-decoration: none;
+      transition: opacity 0.2s;
+    }
+
+    .footer a:hover {
+      text-decoration: underline;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="logo-container">
+      <img src="logo.jpg" alt="Themis Logo" class="logo" />
+    </div>
+    <h1>Themis GitHub App</h1>
+    <p class="subtitle">Autonomous dependency migration and deterministic sandbox verification.</p>
+    
+    <div class="status-badge">
+      <span class="status-dot"></span>
+      Service Operational
+    </div>
+
+    <div class="endpoint-box">
+      <div class="endpoint-label">Webhook Endpoint</div>
+      <div class="endpoint-path">POST /api/github/webhooks</div>
+    </div>
+
+    <div class="footer">
+      Powered by <a href="https://github.com/SatyamPandey-07/H26_UntrainedModels_THEMIS" target="_blank" rel="noopener noreferrer">Themis Engine</a>
+    </div>
+  </div>
+</body>
+</html>
