@@ -21,6 +21,12 @@ function signals(d: DependencyFinding): string {
     parts.push(`latest ${d.risk.latestVersion}`);
   if (d.risk.ageDays !== undefined && d.risk.ageDays > 365)
     parts.push(`last release ${Math.floor(d.risk.ageDays / 365)}y ago`);
+  if (d.importingFiles !== undefined)
+    parts.push(
+      d.importingFiles === 0
+        ? "not imported in source"
+        : `used in ${d.importingFiles} file${d.importingFiles === 1 ? "" : "s"}`,
+    );
   return parts.join(", ") || "no risk signals";
 }
 

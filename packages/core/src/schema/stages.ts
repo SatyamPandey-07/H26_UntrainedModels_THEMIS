@@ -53,6 +53,8 @@ export const DependencyFinding = z.object({
   score: z.number(),
   risk: RiskIndicators,
   rationale: z.string().optional(),
+  /** Source files that import the dependency (computed for the top-ranked ones); the migration's blast radius. */
+  importingFiles: z.number().int().optional(),
 });
 export type DependencyFinding = z.infer<typeof DependencyFinding>;
 

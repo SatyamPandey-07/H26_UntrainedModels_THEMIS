@@ -21,9 +21,12 @@ import { discoverRequirementsFiles } from "../ecosystems/python/requirements.js"
 import type { RegistryInfo } from "../tools/registry.js";
 import { dedupeVulnerabilities } from "../tools/scanners.js";
 import type { PackageVulnerability } from "../tools/types.js";
-import { currentBranch, headCommit } from "../tools/git.js";
+import { currentBranch, headCommit, trackedFiles } from "../tools/git.js";
 import { daysSince, majorsBehind, mapLimit, safeJson } from "../util/misc.js";
 import { runAgent } from "./base.js";
+
+/** Ranked dependencies whose importing files are counted. */
+const BLAST_RADIUS_TOP = 25;
 
 const SEVERITY_POINTS: Record<string, number> = { critical: 30, high: 20, moderate: 10, low: 4, unknown: 6 };
 
@@ -220,6 +223,12 @@ export async function runScout(
       b.risk.vulnerabilities.length - a.risk.vulnerabilities.length ||
       a.name.localeCompare(b.name),
   );
+
+  // Blast radius for the top-ranked dependencies: how many source files import each one.
+  const sources = (await trackedFiles(repoPath)).filter((f) => eco.sourceFile.test(f));
+  for (const dep of ranked.slice(0, BLAST_RADIUS_TOP)) {
+    dep.importingFiles = new Set(eco.regexUsageMap(repoPath, sources, dep.name).map((s) => s.file)).size;
+  }
 
   const unreachable = graph.direct.filter((d) => !registry.get(d.name)).map((d) => d.name);
   if (unreachable.length > 0)
