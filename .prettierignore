@@ -5,3 +5,5 @@ examples
 .themis
 Plan.md
 docs/Themis-PRD.pdf
+plugin/dist
+plugin/engine

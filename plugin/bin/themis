@@ -1,0 +1,4 @@
+#!/usr/bin/env sh
+# Themis CLI bundled with the Claude Code plugin. Claude Code puts this folder on PATH while the plugin is enabled.
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+THEMIS_SKILLS_DIR="${THEMIS_SKILLS_DIR:-$ROOT/engine/skills}" exec node "$ROOT/dist/themis.mjs" "$@"

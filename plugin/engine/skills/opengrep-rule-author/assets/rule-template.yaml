@@ -1,0 +1,13 @@
+rules:
+  - id: themis-PKG-import
+    languages: [javascript, typescript]
+    severity: INFO
+    message: imports PKG
+    metadata:
+      themis-kind: usage
+    paths:
+      exclude: [node_modules, dist, build, coverage, .themis]
+    pattern-either:
+      - pattern: import $M from "PKG"
+      - pattern: const $M = require("PKG")
+      - pattern: require("PKG")
