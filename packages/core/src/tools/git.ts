@@ -103,8 +103,8 @@ export async function commitFiles(
   return headCommit(cwd);
 }
 
-export async function changedFiles(cwd: string, base: string): Promise<string[]> {
-  const out = await gitQuery(cwd, ["diff", "--name-only", `${base}...HEAD`]);
+export async function changedFiles(cwd: string, base: string, head = "HEAD"): Promise<string[]> {
+  const out = await gitQuery(cwd, ["diff", "--name-only", `${base}...${head}`]);
   return out.split("\n").filter(Boolean);
 }
 

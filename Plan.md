@@ -57,7 +57,7 @@ apps/github-app/vercel.json  serverless deployment of the webhook server
 - [x] 8. Docker sandbox (Docker path first exercised on the Actions runner at step 15)
 - [x] 9. Hephaestus — Migrator (characterization-test validation first exercised on the runner at step 15)
 - [x] 10. Minos — Verifier (delta and veto logic checked locally; Docker builds and probes first run on the runner at step 15)
-- [ ] 11. Clio — Capsule Writer and PR report
+- [x] 11. Clio — Capsule Writer and PR report
 - [ ] 12. Hermes — Orchestrator and CLI
 - [ ] 13. GitHub App (Probot)
 - [ ] 14. Claude Code plugin and READMEs
@@ -239,7 +239,7 @@ the plugin in a scratch Claude Code session on a clone and run `/themis` (on the
    runs on the fork's runners.
 - [ ] 10. **App credentials:** generate the private key and a webhook secret; store them only in the runner repo's
    Actions secrets and the Vercel project (plus a local, gitignored copy for development).
-- [ ] 11. **GitHub Marketplace listing (after step 15 passes):** Developer settings → the App → *List in
+- [x] 11. **GitHub Marketplace listing (after step 15 passes):** Developer settings → the App → *List in
    Marketplace*; free plan; descriptions, logo, feature card, screenshots from the WorkSphere demo; privacy policy
    (`PRIVACY.md`) and support (Issues) links; Marketplace webhook = the server URL; accept the developer agreement
    and *Submit for review*. Until approval, owners install from `https://github.com/apps/<app-slug>`.
