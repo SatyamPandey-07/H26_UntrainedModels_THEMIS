@@ -34,7 +34,7 @@ scripts/            install-tools.sh (opengrep, osv-scanner, trivy into ~/.local
 - [x] 1. Workspace scaffold and secrets
 - [x] 2. Contracts, run state and evidence logging
 - [x] 3. Skills (15, agentskills.io format)
-- [ ] 4. Groq LLM client and agent loop
+- [x] 4. Groq LLM client and agent loop
 - [ ] 5. Analysis tools and wrappers
 - [ ] 6. Argus — Scout
 - [ ] 7. Athena — Planner
@@ -163,7 +163,7 @@ locally against the same fork clone.
 - [x] 2. **smee channel (step 13):** open https://smee.io/new, copy URL → `WEBHOOK_PROXY_URL`.
 - [x] 3. **Register GitHub App (step 13):** run `pnpm --filter github-app start` once → open `http://localhost:3000` →
    "Register GitHub App" (Probot manifest flow writes `APP_ID`, `PRIVATE_KEY`, `WEBHOOK_SECRET` to `.env`).
-- [ ] 4. **Fork + install (step 15):** fork the demo-target repo to your account, install the App on the fork only.
+- [x] 4. **Fork + install (step 15):** fork the demo-target repo to your account, install the App on the fork only.
 - [ ] 5. **Alerts (optional):** create a webhook receiver (e.g. a webhook.site URL) → `ALERT_WEBHOOK_URL`.
 
 ## Verification

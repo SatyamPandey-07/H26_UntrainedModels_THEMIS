@@ -5,3 +5,6 @@ export * from "./run/context.js";
 export * from "./evidence/command.js";
 export * from "./evidence/claims.js";
 export * from "./skills/loader.js";
+export * from "./llm/client.js";
+export * from "./agents/base.js";
+export * from "./agents/fs-tools.js";
