@@ -5,6 +5,7 @@ Dependency migration harness for npm projects: ranks risky dependencies, migrate
 ![Node.js](https://img.shields.io/badge/Node.js-%3E%3D22-5FA04E?style=flat-square&logo=nodedotjs&logoColor=white)
 ![TypeScript](https://img.shields.io/badge/TypeScript-6.0-3178C6?style=flat-square&logo=typescript&logoColor=white)
 ![pnpm](https://img.shields.io/badge/pnpm-10.30-F69220?style=flat-square&logo=pnpm&logoColor=white)
+![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg?style=flat-square)
 
 ## Install
 
@@ -290,3 +291,8 @@ pnpm format           # Prettier
 | Ayush Shukla     | [@ayushsshukla](https://github.com/ayushsshukla)       |
 | Satyam Pandey    | [@SatyamPandey-07](https://github.com/SatyamPandey-07) |
 | Keerthan Poojary | [@Thundercloud12](https://github.com/Thundercloud12)   |
+
+## License
+
+This project is licensed under the [Apache License 2.0](LICENSE).
+
