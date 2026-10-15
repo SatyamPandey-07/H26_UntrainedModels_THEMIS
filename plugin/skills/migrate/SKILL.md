@@ -1,5 +1,5 @@
 ---
-description: Migrates one npm dependency on its own themis/* branch - maps every usage, plans the upgrade or replacement, edits the call sites, writes characterization tests that must pass on the old version, verifies the branch against the base branch, and writes a Dependency Exit Capsule tagging every claim by how it was established. Use when the user asks to upgrade, replace or migrate a dependency, or runs /themis:migrate.
+description: Migrates one npm or PyPI (pip requirements.txt) dependency on its own themis/* branch - maps every usage, plans the upgrade or replacement, edits the call sites, writes characterization tests that must pass on the old version, verifies the branch against the base branch, and writes a Dependency Exit Capsule tagging every claim by how it was established. Use when the user asks to upgrade, replace or migrate a dependency, or runs /themis:migrate.
 argument-hint: "[package]"
 ---
 
@@ -56,7 +56,7 @@ Read the files in the usage map. Write `<runDir>/draft.json`:
 ```
 
 `strategy` is `upgrade` or `replace`; `confidence` is `low`, `medium` or `high`. The target version must exist
-on npm. Then run:
+on the registry (npm or PyPI). Then run:
 
 ```bash
 themis step plan <runDir> <runDir>/draft.json
@@ -86,7 +86,12 @@ sites and the import.
 ## 5. Characterization tests
 
 Write tests in the worktree that call the project's own functions at each call site and assert today's exact
-output, named `themis-<package>.characterization.test.<ext>`, each test name starting with `file:line`. Then:
+output, named `themis-<package>.characterization.test.<ext>`, each test name starting with `file:line`.
+
+For Python repositories name each file `test_themis_<package>_characterization.py` (hyphens in the package name
+become underscores). A test name cannot hold `file:line`, so put a call-site tag in the function name instead:
+`L<line>_<file with every non-alphanumeric run replaced by _>`, for example `test_L12_src_dates_py_parses_iso`
+for `src/dates.py:12`. Import project modules, never the dependency under migration. Then:
 
 ```bash
 themis step tests <runDir> <test files relative to the worktree>

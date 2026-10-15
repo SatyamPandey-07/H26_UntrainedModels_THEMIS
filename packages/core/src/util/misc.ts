@@ -56,3 +56,11 @@ export function tail(text: string, lines: number): string {
   const all = text.split("\n");
   return all.slice(Math.max(0, all.length - lines)).join("\n");
 }
+
+/**
+ * True for pre-release versions in npm (`1.2.0-rc.1`) and Python (`1.2rc1`, `2.0a1`, `2.0b2`, `1.0.dev0`, `1.0.post1.dev2`)
+ * notation. Themis never targets a pre-release.
+ */
+export function isPrerelease(version: string): boolean {
+  return /-/.test(version) || /\d(?:\.?)(?:a|b|c|rc|alpha|beta|pre|preview|dev)\.?\d*/i.test(version);
+}

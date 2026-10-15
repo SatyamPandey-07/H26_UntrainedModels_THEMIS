@@ -96,10 +96,16 @@ const program = new Command()
   )
   .option("-C, --repo <path>", "repository to work on", ".")
   .option("--json", "print machine-readable output")
+  .option("--ecosystem <id>", "force the ecosystem: node or python (default: detected from the repository)")
   .showHelpAfterError();
 
 const common = () => {
-  const o = program.opts<{ repo: string; json?: boolean }>();
+  const o = program.opts<{ repo: string; json?: boolean; ecosystem?: string }>();
+  if (o.ecosystem !== undefined) {
+    if (o.ecosystem !== "node" && o.ecosystem !== "python")
+      throw new Error(`--ecosystem must be "node" or "python", got "${o.ecosystem}"`);
+    process.env.THEMIS_ECOSYSTEM = o.ecosystem;
+  }
   return { repoPath: resolve(o.repo), json: Boolean(o.json) };
 };
 

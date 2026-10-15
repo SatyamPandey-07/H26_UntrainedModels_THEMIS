@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { z } from "zod";
 import { ClaimBook } from "../evidence/claims.js";
 import { runCommand } from "../evidence/command.js";
@@ -13,10 +15,11 @@ import type {
 } from "../schema/stages.js";
 import { Findings as FindingsSchema, Toolchain as ToolchainSchema } from "../schema/stages.js";
 import { skillPath } from "../skills/loader.js";
-import { readDependencyGraph } from "../tools/lockfile.js";
-import { npmRegistryInfo } from "../tools/registry.js";
+import type { Ecosystem } from "../ecosystems/types.js";
+import { detectEcosystem, hasPythonManifest } from "../ecosystems/index.js";
+import { discoverRequirementsFiles } from "../ecosystems/python/requirements.js";
 import type { RegistryInfo } from "../tools/registry.js";
-import { DEFAULT_SCANNERS, dedupeVulnerabilities } from "../tools/scanners.js";
+import { dedupeVulnerabilities } from "../tools/scanners.js";
 import type { PackageVulnerability } from "../tools/types.js";
 import { currentBranch, headCommit } from "../tools/git.js";
 import { daysSince, majorsBehind, mapLimit, safeJson } from "../util/misc.js";
@@ -47,11 +50,16 @@ interface DetectOutput extends Partial<Toolchain> {
   sources?: Record<string, string>;
 }
 
-async function detectToolchain(ctx: RunContext, repoPath: string, book: ClaimBook): Promise<Toolchain> {
+async function detectToolchain(
+  ctx: RunContext,
+  repoPath: string,
+  book: ClaimBook,
+  eco: Ecosystem,
+): Promise<Toolchain> {
   const r = await runCommand(ctx, {
     label: "toolchain-detect",
     file: process.execPath,
-    args: [skillPath("toolchain-detect", "scripts/detect.mjs"), repoPath],
+    args: [skillPath("toolchain-detect", eco.detectScript), repoPath],
     cwd: repoPath,
     timeoutMs: 60_000,
   });
@@ -60,11 +68,13 @@ async function detectToolchain(ctx: RunContext, repoPath: string, book: ClaimBoo
     throw new Error(`toolchain detection failed (${r.stderr.trim() || "no output"}); see ${r.logPath}`);
   const { sources = {}, entry: _entry, ...fields } = raw;
   const toolchain = ToolchainSchema.parse(fields);
-  const cite = (key: string) => ({ file: sources[key] ?? "package.json" });
+  const cite = (key: string) => ({ file: sources[key] ?? eco.labels.manifest });
   book.observed("dependency-details", `Language: ${toolchain.language}`, cite("language"));
   book.observed("dependency-details", `Package manager: ${toolchain.packageManager}`, cite("packageManager"));
   if (toolchain.nodeVersion)
     book.observed("dependency-details", `Node version: ${toolchain.nodeVersion}`, cite("nodeVersion"));
+  if (toolchain.pythonVersion)
+    book.observed("dependency-details", `Python version: ${toolchain.pythonVersion}`, cite("pythonVersion"));
   if (toolchain.testCommand)
     book.observed(
       "dependency-details",
@@ -75,16 +85,11 @@ async function detectToolchain(ctx: RunContext, repoPath: string, book: ClaimBoo
     book.unverified(
       "gaps",
       "No test command found; behaviour can only be checked with generated tests and probes.",
-      "package.json has no usable test script",
+      eco.labels.noTestReason,
     );
   if (toolchain.linters.length > 0)
     book.observed("dependency-details", `Linters: ${toolchain.linters.join(", ")}`, cite("linters"));
-  else
-    book.unverified(
-      "gaps",
-      "No linter configuration found; Themis will propose a minimal ESLint config in a separate commit.",
-      "no eslint or biome config in the repository",
-    );
+  else book.unverified("gaps", eco.labels.noLinterGap, eco.labels.noLinterReason);
   return toolchain;
 }
 
@@ -123,6 +128,8 @@ const Rationales = z.object({
 export interface ScoutOptions {
   /** Number of top-ranked dependencies that get registry lookups beyond the first pass and an AI rationale. */
   rationaleCount?: number;
+  /** Force an ecosystem ("node" or "python"); otherwise it is detected from the repository's manifests. */
+  ecosystem?: string;
 }
 
 /** Argus: toolchain detection and dependency risk ranking on the base branch. Never modifies the repository. */
@@ -137,8 +144,23 @@ export async function runScout(
   const baseCommit = await headCommit(repoPath);
   logEvent(ctx, `argus: scanning ${ctx.state.repository} at ${baseRef} (${baseCommit.slice(0, 7)})`);
 
-  const toolchain = await detectToolchain(ctx, repoPath, book);
-  const graph = readDependencyGraph(repoPath);
+  const eco = detectEcosystem(repoPath, opts.ecosystem);
+  const toolchain = await detectToolchain(ctx, repoPath, book, eco);
+  const { graph, gaps: graphGaps } = await eco.readDependencyGraph(repoPath, toolchain);
+  for (const gap of graphGaps)
+    book.unverified("gaps", gap, "dependency manifest could not be fully resolved");
+  if (eco.id === "node" && hasPythonManifest(repoPath))
+    book.unverified(
+      "gaps",
+      `Python requirements files (${discoverRequirementsFiles(repoPath).join(", ")}) were not analysed; this run covers the Node.js project only.`,
+      "one ecosystem is analysed per run",
+    );
+  if (eco.id === "python" && existsSync(join(repoPath, "package.json")))
+    book.unverified(
+      "gaps",
+      "package.json was not analysed; this run covers the Python requirements only.",
+      "one ecosystem is analysed per run",
+    );
   book.observed(
     "dependency-details",
     `${graph.direct.length} direct dependencies (${graph.direct.filter((d) => d.dev).length} dev); tree read from ${graph.source}`,
@@ -147,7 +169,7 @@ export async function runScout(
 
   // Vulnerability scanners: each one either produces an EXECUTED claim or an UNVERIFIED gap.
   const allVulns: PackageVulnerability[] = [];
-  for (const scanner of DEFAULT_SCANNERS) {
+  for (const scanner of eco.scanners) {
     const outcome = await scanner.scan(ctx, repoPath);
     if (outcome.ok) {
       allVulns.push(...outcome.data);
@@ -166,7 +188,7 @@ export async function runScout(
   // Registry signals for every direct dependency.
   const registry = new Map<string, RegistryInfo | undefined>();
   await mapLimit(graph.direct, 8, async (d) => {
-    registry.set(d.name, await npmRegistryInfo(d.name, d.installedVersion));
+    registry.set(d.name, await eco.registryInfo(d.name, d.installedVersion));
   });
 
   const ranked: DependencyFinding[] = graph.direct.map((d) => {
@@ -204,7 +226,7 @@ export async function runScout(
     book.unverified(
       "gaps",
       `Registry data unavailable for: ${unreachable.join(", ")}`,
-      "npm registry lookup failed or package is private",
+      eco.labels.registryGapReason,
     );
 
   const top = ranked.slice(0, opts.rationaleCount ?? 8);

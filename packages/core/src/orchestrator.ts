@@ -129,7 +129,7 @@ export async function runThemis(opts: RunOptions): Promise<RunOutcome> {
       logEvent(ctx, "hermes: planner marked the migration infeasible; writing a Not recommended capsule");
     } else {
       // 3–4. Migrator ⇄ Verifier, retried up to the cap.
-      sandbox = await createSandbox(ctx, outcome.findings.toolchain.nodeVersion);
+      sandbox = await createSandbox(ctx, outcome.findings.toolchain);
       let feedback: VerifierFeedback | undefined;
       for (let attempt = 0; attempt <= config.retryCap; attempt++) {
         checkTime(`migration attempt ${attempt}`);

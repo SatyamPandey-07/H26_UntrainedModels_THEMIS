@@ -4,9 +4,13 @@ import { Claim } from "./claim.js";
 /* ---------- Scout: findings.json ---------- */
 
 export const Toolchain = z.object({
-  language: z.enum(["javascript", "typescript"]),
-  packageManager: z.enum(["npm", "pnpm", "yarn"]),
+  language: z.enum(["javascript", "typescript", "python"]),
+  packageManager: z.enum(["npm", "pnpm", "yarn", "pip"]),
   nodeVersion: z.string().optional(),
+  /** Python only: interpreter version from .python-version, runtime.txt or requires-python. */
+  pythonVersion: z.string().optional(),
+  /** Python only: requirements files (relative paths) that declare dependencies. */
+  requirementsFiles: z.array(z.string()).optional(),
   testRunner: z.string().optional(),
   testCommand: z.string().optional(),
   formatter: z.string().optional(),

@@ -4,7 +4,20 @@ import { z } from "zod";
 import type { AgentTool } from "./base.js";
 import { defineTool } from "./base.js";
 
-const IGNORED_DIRS = new Set(["node_modules", ".git", ".themis", "dist", "build", "coverage"]);
+const IGNORED_DIRS = new Set([
+  "node_modules",
+  ".git",
+  ".themis",
+  "dist",
+  "build",
+  "coverage",
+  ".venv",
+  "venv",
+  "__pycache__",
+  ".tox",
+  ".pytest_cache",
+  "site-packages",
+]);
 const MAX_FILE_BYTES = 200_000;
 
 /** Resolves a model-supplied path inside `root`, refusing anything that escapes it. */
@@ -46,7 +59,7 @@ export function readOnlyTools(root: string): AgentTool<unknown>[] {
     defineTool({
       name: "list_files",
       description:
-        "List repository files (relative paths) under a directory. Skips node_modules, .git, dist, build, coverage.",
+        "List repository files (relative paths) under a directory. Skips node_modules, .git, dist, build, coverage, virtualenvs.",
       parameters: z.object({ dir: z.string().default(".") }),
       handler: ({ dir }) => listFiles(root, dir).join("\n") || "(no files)",
     }),

@@ -1,6 +1,6 @@
 ---
 name: opengrep-rule-author
-description: Writes Opengrep (Semgrep-compatible) YAML rules that find every use of a given npm dependency in a JavaScript or TypeScript repository (imports, requires, calls and chained methods) and, where the rewrite is mechanical, adds a fix that performs the migration. Use when mapping where a dependency is used before planning a migration, or when a deterministic autofix can replace model edits.
+description: Writes Opengrep (Semgrep-compatible) YAML rules that find every use of a given npm or PyPI dependency in a JavaScript, TypeScript or Python repository (imports, requires, calls and chained methods) and, where the rewrite is mechanical, adds a fix that performs the migration. Use when mapping where a dependency is used before planning a migration, or when a deterministic autofix can replace model edits.
 compatibility: Requires opengrep on PATH and read access to the repository.
 metadata:
   owner: athena
@@ -24,12 +24,14 @@ patterns in [references/rule-patterns.md](references/rule-patterns.md).
 
 ## Rules for writing rules
 
-- Use `languages: [javascript, typescript]` so both file types match.
+- Use `languages: [javascript, typescript]` so both file types match. For Python repositories use
+  `languages: [python]` and the patterns in [references/rule-patterns-python.md](references/rule-patterns-python.md).
 - Bind the imported name with a metavariable (`$M`) and follow it with `pattern-inside` instead of
   guessing the local name.
 - Every rule needs a unique `id` prefixed with `themis-<package>-`.
 - Keep messages factual: what was matched, not advice.
-- Never match files under `node_modules`, `dist`, `build`, `coverage` or `.themis`.
+- Never match files under `node_modules`, `dist`, `build`, `coverage` or `.themis` (for Python also `.venv`,
+  `venv`, `__pycache__`, `.tox` and `site-packages`).
 
 The engine runs every rule you write. A rule that fails to parse or matches nothing in a file that clearly
 imports the package is reported back to you once for correction.

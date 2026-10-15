@@ -1,5 +1,5 @@
 ---
-description: Ranks this repository's direct npm dependencies by maintenance risk (vulnerabilities, deprecation, release age, maintainers, transitive weight) and recommends which one to migrate next. Read-only. Use when the user asks which dependencies are risky, outdated or deprecated, or runs /themis:scan.
+description: Ranks this repository's direct npm or PyPI (pip requirements.txt) dependencies by maintenance risk (vulnerabilities, deprecation, release age, maintainers, transitive weight) and recommends which one to migrate next. Read-only. Use when the user asks which dependencies are risky, outdated or deprecated, or runs /themis:scan.
 argument-hint: "[path to repository]"
 ---
 
