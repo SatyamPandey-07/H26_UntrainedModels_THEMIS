@@ -24,3 +24,5 @@ export * from "./agents/migrator.js";
 export * from "./agents/verifier.js";
 export * from "./capsule/gate.js";
 export * from "./capsule/writer.js";
+export * from "./alerts.js";
+export * from "./orchestrator.js";

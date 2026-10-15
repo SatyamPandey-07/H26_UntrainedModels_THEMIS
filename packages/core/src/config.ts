@@ -3,7 +3,9 @@ import { dirname, join, resolve } from "node:path";
 import { z } from "zod";
 
 const ConfigSchema = z.object({
-  groqApiKey: z.string().min(1, "GROQ_API_KEY is not set"),
+  groqApiKey: z
+    .string({ error: "GROQ_API_KEY is not set (export it or add it to .env)" })
+    .min(1, "GROQ_API_KEY is empty"),
   groqModel: z.string().min(1).default("openai/gpt-oss-120b"),
   retryCap: z.coerce.number().int().min(0).max(10).default(2),
   maxOpenPrs: z.coerce.number().int().min(1).max(50).default(3),
