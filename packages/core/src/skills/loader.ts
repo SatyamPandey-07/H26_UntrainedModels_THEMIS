@@ -141,6 +141,28 @@ export function renderSkills(skills: Skill[]): string {
   return skills.map((s) => `<skill name="${s.name}">\n${s.description}\n\n${s.body}\n</skill>`).join("\n\n");
 }
 
+/** Skills whose full text is kept even in the digest: they carry safety rules the model must not lose. */
+const DIGEST_KEEPS_FULL = new Set(["untrusted-input-guard"]);
+/** Sections of a shared skill that instruct the model itself (the rest describes what the engine does). */
+const MODEL_SECTION = /(for models|model output|rules for (the )?model)/i;
+
+/**
+ * A shorter rendering for requests that would otherwise exceed the model's token limit. Owned skills and the
+ * untrusted-input guard stay whole; other shared skills keep their description and the sections addressed to
+ * the model, and drop the engine-side tables and rules.
+ */
+export function renderSkillsDigest(skills: Skill[]): string {
+  return skills
+    .map((s) => {
+      if (!s.shared || DIGEST_KEEPS_FULL.has(s.name)) return renderSkills([s]);
+      const sections = s.body.split(/\n(?=#{2,} )/);
+      const kept = sections.filter((sec, i) => i > 0 && MODEL_SECTION.test(sec.split("\n")[0] ?? ""));
+      const body = kept.length > 0 ? kept.join("\n\n") : (sections[0] ?? "").slice(0, 700);
+      return `<skill name="${s.name}">\n${s.description}\n\n${body}\n</skill>`;
+    })
+    .join("\n\n");
+}
+
 /** Reads a file bundled with a skill (references/, assets/, scripts/). */
 export function readSkillFile(
   skillName: string,

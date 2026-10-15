@@ -50,7 +50,7 @@ export function listFiles(root: string, dir = ".", limit = 400): string[] {
 function numbered(text: string, start = 1): string {
   return text
     .split("\n")
-    .map((line, i) => `${String(i + start).padStart(5)}  ${line}`)
+    .map((line, i) => `${i + start}|${line}`)
     .join("\n");
 }
 

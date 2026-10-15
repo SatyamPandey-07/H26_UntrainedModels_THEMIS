@@ -47,6 +47,7 @@ env:
   # One retry round is drawn as its own boxes below.
   THEMIS_RETRY_CAP: "1"
   GROQ_MODEL: ${{ vars.GROQ_MODEL || 'openai/gpt-oss-120b' }}
+  GROQ_FALLBACK_MODEL: ${{ vars.GROQ_FALLBACK_MODEL || 'qwen/qwen3.8-27b' }}
 
 jobs:
   prepare:
@@ -143,7 +144,13 @@ jobs:
       recommended: ${{ steps.scout.outputs.recommended }}
       state: ${{ steps.handover.outputs.state }}
     env:
+      # Up to five Groq keys, tried in order; each key tries GROQ_MODEL, then GROQ_FALLBACK_MODEL.
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      GROQ_API_KEY_1: ${{ secrets.GROQ_API_KEY_1 }}
+      GROQ_API_KEY_2: ${{ secrets.GROQ_API_KEY_2 }}
+      GROQ_API_KEY_3: ${{ secrets.GROQ_API_KEY_3 }}
+      GROQ_API_KEY_4: ${{ secrets.GROQ_API_KEY_4 }}
+      GROQ_API_KEY_5: ${{ secrets.GROQ_API_KEY_5 }}
     steps:
       - uses: actions/checkout@v7
         with: { persist-credentials: false }
@@ -172,7 +179,13 @@ jobs:
       dependency: ${{ steps.plan.outputs.dependency }}
       state: ${{ steps.handover.outputs.state }}
     env:
+      # Up to five Groq keys, tried in order; each key tries GROQ_MODEL, then GROQ_FALLBACK_MODEL.
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      GROQ_API_KEY_1: ${{ secrets.GROQ_API_KEY_1 }}
+      GROQ_API_KEY_2: ${{ secrets.GROQ_API_KEY_2 }}
+      GROQ_API_KEY_3: ${{ secrets.GROQ_API_KEY_3 }}
+      GROQ_API_KEY_4: ${{ secrets.GROQ_API_KEY_4 }}
+      GROQ_API_KEY_5: ${{ secrets.GROQ_API_KEY_5 }}
     steps:
       - uses: actions/checkout@v7
         with: { persist-credentials: false }
@@ -197,7 +210,13 @@ jobs:
     outputs:
       state: ${{ steps.handover.outputs.state }}
     env:
+      # Up to five Groq keys, tried in order; each key tries GROQ_MODEL, then GROQ_FALLBACK_MODEL.
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      GROQ_API_KEY_1: ${{ secrets.GROQ_API_KEY_1 }}
+      GROQ_API_KEY_2: ${{ secrets.GROQ_API_KEY_2 }}
+      GROQ_API_KEY_3: ${{ secrets.GROQ_API_KEY_3 }}
+      GROQ_API_KEY_4: ${{ secrets.GROQ_API_KEY_4 }}
+      GROQ_API_KEY_5: ${{ secrets.GROQ_API_KEY_5 }}
     steps:
       - uses: actions/checkout@v7
         with: { persist-credentials: false }
@@ -272,7 +291,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
+      # Up to five Groq keys, tried in order; each key tries GROQ_MODEL, then GROQ_FALLBACK_MODEL.
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      GROQ_API_KEY_1: ${{ secrets.GROQ_API_KEY_1 }}
+      GROQ_API_KEY_2: ${{ secrets.GROQ_API_KEY_2 }}
+      GROQ_API_KEY_3: ${{ secrets.GROQ_API_KEY_3 }}
+      GROQ_API_KEY_4: ${{ secrets.GROQ_API_KEY_4 }}
+      GROQ_API_KEY_5: ${{ secrets.GROQ_API_KEY_5 }}
     steps:
       - uses: actions/checkout@v7
         with: { persist-credentials: false }

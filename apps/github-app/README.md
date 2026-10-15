@@ -58,7 +58,7 @@ flowchart LR
   GH[GitHub event] --> S[Webhook server<br/>Probot on Vercel]
   S -->|repository_dispatch| W[themis-runner.yml<br/>runner repository]
   W --> P[prepare<br/>clone, read-only token]
-  P --> L[pipeline<br/>GROQ_API_KEY only, Docker]
+  P --> L[pipeline<br/>Groq keys only, Docker]
   L --> U[publish<br/>write token, no target code]
   U --> T[Target repository<br/>branch, draft PR, Check Run, dashboard]
 ```
@@ -79,12 +79,13 @@ delivery timeout. All analysis runs in [`.github/workflows/themis-runner.yml`](.
 
 In the runner repository, under **Settings → Secrets and variables → Actions**:
 
-| Name                                        | Kind              | Value                                     |
-| ------------------------------------------- | ----------------- | ----------------------------------------- |
-| `THEMIS_APP_CLIENT_ID`                      | Variable          | The App's Client ID                       |
-| `THEMIS_APP_PRIVATE_KEY`                    | Secret            | The App's private key (PEM, pasted as is) |
-| `GROQ_API_KEY`                              | Secret            | Groq API key                              |
-| `ALERT_WEBHOOK_URL`, `ALERT_WEBHOOK_SECRET` | Secrets, optional | Alert receiver and signing secret         |
+| Name                                        | Kind              | Value                                                                    |
+| ------------------------------------------- | ----------------- | ------------------------------------------------------------------------ |
+| `THEMIS_APP_CLIENT_ID`                      | Variable          | The App's Client ID                                                      |
+| `THEMIS_APP_PRIVATE_KEY`                    | Secret            | The App's private key (PEM, pasted as is)                                |
+| `GROQ_API_KEY_1` … `GROQ_API_KEY_5`         | Secret            | Groq API keys, tried in order (one is enough; `GROQ_API_KEY` also works) |
+| `GROQ_FALLBACK_MODEL`                       | Variable          | Model tried after `GROQ_MODEL` on each key (default `qwen/qwen3.8-27b`)  |
+| `ALERT_WEBHOOK_URL`, `ALERT_WEBHOOK_SECRET` | Secrets, optional | Alert receiver and signing secret                                        |
 
 Install the App on the runner repository too, so the webhook server can dispatch runs there.
 

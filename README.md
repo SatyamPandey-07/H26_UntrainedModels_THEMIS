@@ -165,19 +165,30 @@ The CLI is now available at `packages/core/dist/cli.js`.
 
 ### Environment variables
 
-| Variable                       | Required             | Description                                                                            | Example                            |
-| ------------------------------ | -------------------- | -------------------------------------------------------------------------------------- | ---------------------------------- |
-| `GROQ_API_KEY`                 | For `plan` and `run` | Groq API key used by the agents. `scan` and the plugin's step commands work without it | `your-groq-api-key`                |
-| `GROQ_MODEL`                   | No                   | Groq model with tool calling                                                           | `openai/gpt-oss-120b` (default)    |
-| `THEMIS_RETRY_CAP`             | No                   | Migration retries after a Verifier veto                                                | `2` (default)                      |
-| `THEMIS_MAX_OPEN_PRS`          | No                   | Open Themis PRs allowed per repository                                                 | `3` (default)                      |
-| `ALERT_WEBHOOK_URL`            | No                   | Receives a JSON alert when a run completes or fails                                    | `https://example.com/hooks/themis` |
-| `ALERT_WEBHOOK_SECRET`         | No                   | Signs alerts in the `x-themis-signature-256` header (HMAC-SHA256)                      | `your-shared-secret`               |
-| `THEMIS_FULL_TESTS`            | No                   | Set to `1` to run the full test suite instead of related and characterization tests    | `1`                                |
-| `THEMIS_SKILLS_DIR`            | No                   | Overrides the location of the `skills/` folder                                         | `/opt/themis/skills`               |
-| `THEMIS_PROMPT_TOKEN_BUDGET`   | No                   | Estimated prompt tokens per model request; older tool output is trimmed to fit         | `5000` (default)                   |
-| `THEMIS_MAX_COMPLETION_TOKENS` | No                   | Tokens reserved for each model response                                                | `2500` (default)                   |
-| `THEMIS_REASONING_EFFORT`      | No                   | Reasoning effort for `gpt-oss` models: `low`, `medium` or `high`                       | `low` (default)                    |
+| Variable                            | Required             | Description                                                                                                                                                                 | Example                            |
+| ----------------------------------- | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- |
+| `GROQ_API_KEY_1` … `GROQ_API_KEY_N` | For `plan` and `run` | Groq API keys, tried in numeric order. `GROQ_API_KEY` (single key) and `GROQ_API_KEYS` (comma separated) also work. `scan` and the plugin's step commands work without them | `your-groq-api-key`                |
+| `GROQ_MODEL`                        | No                   | Primary Groq model with tool calling, tried first on every key                                                                                                              | `openai/gpt-oss-120b` (default)    |
+| `GROQ_FALLBACK_MODEL`               | No                   | Model(s) tried next on the same key when the primary is rate limited; comma separated, `none` disables                                                                      | `qwen/qwen3.8-27b` (default)       |
+| `THEMIS_GROQ_MAX_WAIT_SECONDS`      | No                   | Longest wait for a rate-limited slot when every key and model is busy                                                                                                       | `90` (default)                     |
+| `THEMIS_RETRY_CAP`                  | No                   | Migration retries after a Verifier veto                                                                                                                                     | `2` (default)                      |
+| `THEMIS_MAX_OPEN_PRS`               | No                   | Open Themis PRs allowed per repository                                                                                                                                      | `3` (default)                      |
+| `ALERT_WEBHOOK_URL`                 | No                   | Receives a JSON alert when a run completes or fails                                                                                                                         | `https://example.com/hooks/themis` |
+| `ALERT_WEBHOOK_SECRET`              | No                   | Signs alerts in the `x-themis-signature-256` header (HMAC-SHA256)                                                                                                           | `your-shared-secret`               |
+| `THEMIS_FULL_TESTS`                 | No                   | Set to `1` to run the full test suite instead of related and characterization tests                                                                                         | `1`                                |
+| `THEMIS_SKILLS_DIR`                 | No                   | Overrides the location of the `skills/` folder                                                                                                                              | `/opt/themis/skills`               |
+| `THEMIS_PROMPT_TOKEN_BUDGET`        | No                   | Upper bound on prompt tokens per request; the budget is otherwise derived from the model's token-per-minute limit                                                           | `24000` (default)                  |
+| `THEMIS_MAX_COMPLETION_TOKENS`      | No                   | Largest completion reserved for each model response (reduced automatically for small limits)                                                                                | `2500` (default)                   |
+| `THEMIS_TPM_LIMIT`                  | No                   | Overrides the token-per-minute limit otherwise learned from Groq's headers and errors                                                                                       | `8000`                             |
+| `THEMIS_FALLBACK_REASONING`         | No                   | `reasoning_effort` sent to the fallback `qwen/*` model (`none` runs it without thinking)                                                                                    | `none` (default)                   |
+| `THEMIS_REASONING_EFFORT`           | No                   | Reasoning effort for `gpt-oss` models: `low`, `medium` or `high`                                                                                                            | `low` (default)                    |
+
+**Several Groq keys.** Each call uses the first key and model that is not rate limited and has token headroom.
+A slot that returns 429 is skipped immediately (no waiting while another slot is free): the same key's fallback
+model is tried first, then the next key. Groq applies limits **per organization**, so keys only add capacity when
+they come from different Groq organizations. A request that is too large for a model is re-shaped for that model's
+limit instead of being rotated away; `llm-usage.json` in the run directory records calls, tokens and limit hits per
+slot, and keys are never logged.
 
 Themis reads `.env` from the target repository or its parent directories. When you run it against a repository
 outside this checkout, export the variables first:
