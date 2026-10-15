@@ -17,6 +17,10 @@ const DEFAULT_TPM = 8_000;
 const SAFETY_MARGIN = 300;
 const MIN_COMPLETION = 600;
 const PREFERRED_COMPLETION = 1_500;
+/** Reasoning models spend part of the completion on thinking, so they get a larger answer reserve. */
+const PREFERRED_COMPLETION_REASONING = 2_000;
+/** A prompt below this size cannot hold the system prompt and tool schemas, so it is never squeezed further. */
+const MIN_PROMPT_TOKENS = 3_500;
 /** A rate limit that resets later than this is treated as "exhausted for this run". */
 const LONG_COOLDOWN_MS = 15 * 60_000;
 const DEFAULT_COOLDOWN_MS = 20_000;
@@ -320,10 +324,17 @@ export class GroqPool implements LlmClient {
         }
         const limit = this.limitFor(slot.model);
         const maxCompletion = Math.max(MIN_COMPLETION, request.maxTokens ?? COMPLETION_TOKENS) * boost;
-        // Roughly a fifth of the window is kept for the answer; tighter models get a proportionally smaller reserve.
+        // A fifth to a quarter of the window is kept for the answer; tighter models get a proportionally
+        // smaller reserve. A boosted reserve makes room by shrinking the prompt, never below MIN_PROMPT_TOKENS.
+        const share = slot.model.startsWith("openai/gpt-oss")
+          ? PREFERRED_COMPLETION_REASONING
+          : PREFERRED_COMPLETION;
+        const room =
+          limit - SAFETY_MARGIN - Math.min(MIN_PROMPT_TOKENS, limit - SAFETY_MARGIN - MIN_COMPLETION);
         const preferred = Math.min(
           maxCompletion,
-          Math.max(MIN_COMPLETION, Math.floor(limit * (PREFERRED_COMPLETION / DEFAULT_TPM))) * boost,
+          room,
+          Math.max(MIN_COMPLETION, Math.floor(limit * (share / DEFAULT_TPM))) * boost,
         );
         const promptBudget = Math.max(
           500,
@@ -337,12 +348,12 @@ export class GroqPool implements LlmClient {
               chars: JSON.stringify(request.messages).length,
               fits: true,
             };
-        const room = limit - SAFETY_MARGIN - view.tokens;
-        if (!view.fits || room < MIN_COMPLETION) {
+        const spare = limit - SAFETY_MARGIN - view.tokens;
+        if (!view.fits || spare < MIN_COMPLETION) {
           tooBig = { tokens: view.tokens, limit };
           continue;
         }
-        const completion = Math.min(maxCompletion, room);
+        const completion = Math.min(maxCompletion, spare);
         const need = view.tokens + completion;
         if (need > this.headroom(slot, limit, now)) {
           const at = this.releaseTime(slot, need, limit, now);
@@ -486,6 +497,7 @@ export class GroqPool implements LlmClient {
     let level = 0;
     let boost = 1;
     let shrinks = 0;
+    let lengthRetries = 0;
     const transient = new Map<Slot, number>();
     for (let guard = 0; guard < 100; guard++) {
       const { slot, view, completion } = await this.choose(request, level, boost);
@@ -493,15 +505,14 @@ export class GroqPool implements LlmClient {
       try {
         const out = await this.call(slot, view, completion, request);
         this.lastUsed = slot;
-        const maxCompletion = Math.max(MIN_COMPLETION, request.maxTokens ?? COMPLETION_TOKENS);
-        if (
-          out.finishReason === "length" &&
-          out.toolCalls.length === 0 &&
-          boost === 1 &&
-          completion < maxCompletion * 2 &&
-          this.limitFor(slot.model) - SAFETY_MARGIN - view.tokens > completion
-        ) {
-          boost = 2;
+        if (out.finishReason === "length" && out.toolCalls.length === 0 && lengthRetries < 2) {
+          // Cut off before any tool call: retry with a larger answer reserve. choose() makes the room by
+          // shrinking the prompt, so this works even when the prompt was filling the window.
+          lengthRetries += 1;
+          boost = lengthRetries === 1 ? 1.6 : 2.4;
+          this.log(
+            `${slot.label}: answer cut off at ${completion} tokens with no tool call; retrying with a larger reserve`,
+          );
           continue;
         }
         return out;
@@ -509,7 +520,8 @@ export class GroqPool implements LlmClient {
         const recovered = recoverToolCall(err);
         if (recovered) {
           this.lastUsed = slot;
-          return { ...recovered, model: slot.model, shapedChars: view.chars };
+          this.log(`${slot.label}: model produced no usable tool call (${recovered.finishReason})`);
+          return { ...recovered, model: slot.model, shapedChars: view.chars, completionCap: completion };
         }
         const verdict = this.classify(slot, err, transient);
         if (verdict === "shrink") {
@@ -540,7 +552,14 @@ export class GroqPool implements LlmClient {
         model: slot.model,
         messages: view.messages as ChatMessage[],
         ...(request.tools && request.tools.length > 0
-          ? { tools: request.tools, tool_choice: request.toolChoice ?? "auto", parallel_tool_calls: false }
+          ? {
+              tools: request.tools,
+              tool_choice:
+                typeof request.toolChoice === "object"
+                  ? { type: "function", function: { name: request.toolChoice.name } }
+                  : (request.toolChoice ?? "auto"),
+              parallel_tool_calls: false,
+            }
           : {}),
         temperature: request.temperature ?? 0.2,
         // Groq counts the reserved completion against the per-minute token limit, so it is sized per request.
@@ -578,6 +597,7 @@ export class GroqPool implements LlmClient {
       content: stripThinking(choice?.message.content ?? ""),
       toolCalls: choice?.message.tool_calls ?? [],
       finishReason: choice?.finish_reason ?? "unknown",
+      completionCap: completion,
       usage: { promptTokens: prompt, completionTokens },
       model: slot.model,
       shapedChars: view.chars,

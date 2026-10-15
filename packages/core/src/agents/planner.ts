@@ -152,16 +152,24 @@ export async function runPlanner(
 
   let feedback = "";
   for (let attempt = 0; attempt < 2; attempt++) {
-    const drafted = await runAgent(ctx, llm, {
-      agent: "athena",
-      label: `rules-${attempt}`,
-      task: feedback ? `${ruleTask}\n\nYour previous rules failed: ${feedback}` : ruleTask,
-      data: ruleData,
-      tools: readOnlyTools(repoPath),
-      output: RulesDraft,
-      outputDescription: "Submit the usage rules YAML and, optionally, fix rules YAML.",
-      maxSteps: 12,
-    });
+    let drafted: Awaited<ReturnType<typeof runAgent<z.infer<typeof RulesDraft>>>>;
+    try {
+      drafted = await runAgent(ctx, llm, {
+        agent: "athena",
+        label: `rules-${attempt}`,
+        task: feedback ? `${ruleTask}\n\nYour previous rules failed: ${feedback}` : ruleTask,
+        data: ruleData,
+        tools: readOnlyTools(repoPath),
+        output: RulesDraft,
+        outputDescription: "Submit the usage rules YAML and, optionally, fix rules YAML.",
+        maxSteps: 12,
+      });
+    } catch (err) {
+      // Model-written rules only refine the deterministic import rule; their absence must not stop the run.
+      mapperNote = `Model-written rules were not produced (${(err as Error).message}); the import rule and regex mapping were used.`;
+      logEvent(ctx, `athena: ${mapperNote}`);
+      break;
+    }
     const parsedUsage = parseRules(drafted.output.usageRulesYaml, pkg, eco.ruleLanguages);
     const parsedFix = drafted.output.fixRulesYaml
       ? parseRules(drafted.output.fixRulesYaml, pkg, eco.ruleLanguages)
@@ -209,7 +217,10 @@ export async function runPlanner(
   const usageRulesPath = writeRules(ctx, `${slug}-usage.yaml`, usageRules);
   const fixRulesPath = fixRules ? writeRules(ctx, `${slug}-fix.yaml`, fixRules) : undefined;
 
-  if (!useOpengrep) mapperNote = "Opengrep is not installed; usage was mapped with the regex fallback.";
+  if (!useOpengrep)
+    mapperNote = [mapperNote, "Opengrep is not installed; usage was mapped with the regex fallback."]
+      .filter(Boolean)
+      .join(" ");
   if (mapperNote) {
     const covered = new Set(usage.map((s) => s.file));
     usage = dedupeSites([...usage, ...regexSites.filter((s) => !covered.has(s.file) || !useOpengrep)]);
