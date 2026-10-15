@@ -1,7 +1,7 @@
 ---
 name: sandbox-verify
 description: Builds the base branch and the Themis candidate branch in identical Docker sandboxes (network cut after install, resource limits, read-only source), runs the same tests, lint and security rescans in both, and judges only the difference. Use when verifying a migration, deciding the Verifier veto, or explaining why a candidate was rejected.
-compatibility: Requires Docker with a running daemon. Dependency install needs registry network access; everything after install runs with no network.
+compatibility: Requires Docker with a running daemon. Dependency install needs registry network access (npm or PyPI); everything after install runs with no network.
 metadata:
   owner: minos
   version: "0.1"
@@ -40,3 +40,11 @@ Your veto is final. The Migrator may retry; it may not overrule you.
 The engine writes veto reasons deterministically as short factual sentences naming the test, file, probe or
 vulnerability ID, so they cannot be softened. The model's only task in this stage is choosing black-box probes
 (see `blackbox-probe-diff`).
+
+## Python repositories
+
+The image is `docker/sandbox-python.Dockerfile`: `python:<major.minor>-slim-bookworm` (minimum version from
+`.python-version`, `runtime.txt` or `requires-python`), every `requirements*.txt` installed in one `pip install`,
+and `pytest` added when the detected runner is pytest. Bytecode writing is disabled because the root
+filesystem is read-only. Tests write JUnit XML to `/tmp`, which the engine parses. Black-box probes use a small
+Python client inside the image.

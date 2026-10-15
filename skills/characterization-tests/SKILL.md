@@ -30,4 +30,13 @@ The tests are run against the **base branch** first. Only tests that pass on the
 and committed. Failing tests are discarded and listed under gaps with their log. Never edit a test until
 it goes green; a test that fails on the base branch describes behaviour you got wrong.
 
-See [references/test-shapes.md](references/test-shapes.md) for runner-specific templates.
+See [references/test-shapes.md](references/test-shapes.md) for runner-specific templates (Jest, Vitest,
+node:test) and [references/test-shapes-python.md](references/test-shapes-python.md) for pytest and unittest.
+
+## Python repositories
+
+- Name each file `test_themis_<dep>_characterization.py` (hyphens in the dependency name become underscores).
+- Test names cannot contain `file:line`, so the engine gives each call site a tag, for example
+  `L12_src_dates_py` for `src/dates.py:12`. Put the tag in the test function name
+  (`test_L12_src_dates_py_parses_iso`); the Verifier counts a site as covered when a passing test name
+  contains its tag.

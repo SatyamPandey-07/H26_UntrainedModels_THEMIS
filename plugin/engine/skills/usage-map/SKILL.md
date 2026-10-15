@@ -35,3 +35,13 @@ Given the findings for one dependency and its usage map, return a plan:
 6. **Confidence.** `low`, `medium` or `high`, justified in the rationale.
 
 Everything in the plan is AI-RECOMMENDED. Only reference files and lines that appear in the usage map.
+
+## Python repositories
+
+- A PyPI distribution name is not always the module you import (`PyYAML` is imported as `yaml`,
+  `beautifulsoup4` as `bs4`). The engine supplies `candidate-import-names.txt` and
+  `modules-imported-in-repo.txt`; use them, and the table in
+  [references/python-import-names.md](references/python-import-names.md), before writing a rule.
+- `dependency` concern files are the requirements files; the plan's target must exist on PyPI.
+- Call sites are matched by module-attribute calls (`yaml.load(...)`) and by names imported with
+  `from x import y`.

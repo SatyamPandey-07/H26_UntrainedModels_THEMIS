@@ -1,7 +1,7 @@
 ---
 name: dependency-risk-rank
-description: Ranks a repository's direct npm dependencies by maintenance risk using known vulnerabilities (npm audit, OSV-Scanner, Trivy), registry signals (deprecation, last publish date, maintainers, major versions behind) and transitive weight, without modifying the repository. Use when choosing which dependency Themis should migrate first, or when explaining why a dependency is risky.
-compatibility: Needs network access to registry.npmjs.org and api.osv.dev. Uses osv-scanner and trivy when on PATH; npm audit needs a lockfile.
+description: Ranks a repository's direct npm or PyPI dependencies by maintenance risk using known vulnerabilities (npm audit, pip-audit, OSV-Scanner, Trivy), registry signals (deprecation or yanked releases, last publish date, maintainers, major versions behind) and transitive weight, without modifying the repository. Use when choosing which dependency Themis should migrate first, or when explaining why a dependency is risky.
+compatibility: Needs network access to registry.npmjs.org or pypi.org, and api.osv.dev. Uses osv-scanner, trivy and pip-audit when on PATH; npm audit needs a lockfile.
 metadata:
   owner: argus
   version: "0.1"
@@ -34,3 +34,20 @@ and do not recommend a replacement here; that is the Planner's job.
 
 `findings.json` → `dependencies[]` sorted by `score` descending. Only direct dependencies are ranked;
 transitive packages contribute to their parent's `transitiveCount`.
+
+## Python (PyPI) repositories
+
+The same score applies; only the signal sources differ.
+
+| Signal                       | Source                                                                                                           | Claim tag              |
+| ---------------------------- | ---------------------------------------------------------------------------------------------------------------- | ---------------------- |
+| Vulnerabilities              | `pip-audit -r <pinned> --no-deps`, `osv-scanner` on requirements files, `trivy fs`                               | EXECUTED (command log) |
+| Deprecation                  | the installed (else latest) release is yanked, or the project is classified `Development Status :: 7 - Inactive` | OBSERVED (URL)         |
+| Latest version, last publish | `https://pypi.org/pypi/<name>/json`                                                                              | OBSERVED (URL)         |
+| Maintainers                  | distinct `author` / `maintainer` names on PyPI (unknown when both are empty)                                     | OBSERVED (URL)         |
+| Weekly downloads             | `https://pypistats.org/api/packages/<name>/recent`                                                               | OBSERVED (URL)         |
+| Transitive weight            | unconditional `requires_dist` entries of the pinned release (one level)                                          | OBSERVED (URL)         |
+
+Package names are compared in PEP 503 normalised form (`PyYAML` and `pyyaml` are the same package).
+Entries that are not exactly pinned are ranked against the latest release and reported as a gap; URL, VCS and
+editable requirements cannot be ranked and are listed as gaps.
