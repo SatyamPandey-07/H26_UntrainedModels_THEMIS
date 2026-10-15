@@ -1,0 +1,53 @@
+name: Themis setup
+description: Build the Themis engine, install the pinned analysis tools, and restore the run state handed over by the previous agent.
+inputs:
+  state:
+    description: Name of the state artifact to restore (target repository, worktrees and run directory)
+    required: false
+    default: ""
+  github-app:
+    description: Also build the GitHub App package (publish and rescan steps)
+    required: false
+    default: "false"
+  tools:
+    description: Install Opengrep, OSV-Scanner, Trivy and pip-audit
+    required: false
+    default: "true"
+runs:
+  using: composite
+  steps:
+    - uses: pnpm/action-setup@v6
+
+    - uses: actions/setup-node@v7
+      with:
+        node-version: "22"
+        cache: pnpm
+
+    - name: Build Themis
+      shell: bash
+      env:
+        WITH_APP: ${{ inputs.github-app }}
+      run: |
+        pnpm install --frozen-lockfile
+        if [[ "$WITH_APP" == "true" ]]; then
+          pnpm --filter @themis/core --filter @themis/github-app build
+        else
+          pnpm --filter @themis/core build
+        fi
+
+    - name: Install analysis tools
+      if: ${{ inputs.tools == 'true' }}
+      shell: bash
+      run: scripts/install-tools.sh "$HOME/.local/bin" && echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+    - name: Download handed-over state
+      if: ${{ inputs.state != '' }}
+      uses: actions/download-artifact@v8
+      with:
+        name: ${{ inputs.state }}
+        path: .handover
+
+    - name: Restore state
+      if: ${{ inputs.state != '' }}
+      shell: bash
+      run: tar -xzf .handover/state.tgz && rm -rf .handover

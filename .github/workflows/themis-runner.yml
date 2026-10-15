@@ -1,8 +1,14 @@
 name: Themis runner
+run-name: "Themis · ${{ github.event.inputs.mode || github.event.client_payload.mode || 'rescan' }} · ${{ github.event.inputs.repository || github.event.client_payload.repository || 'all installations' }} · ${{ github.event.inputs.package || github.event.client_payload.package || 'recommended' }}"
 
-# Runs the Themis pipeline against a repository where the Themis GitHub App is installed.
-# Started by the App's webhook server (repository_dispatch), by hand (workflow_dispatch), by the weekly schedule
-# (rescan), or by itself when a scan decides to auto-migrate the top risky dependency.
+# Hermes, the orchestrator, is this workflow. Each agent runs as its own job and hands its state to the next one:
+#
+#   Prepare -> Argus (scout) -> Athena (planner) -> Hephaestus (migrator)
+#           -> Minos baseline sandbox  | in parallel
+#           -> Minos candidate sandbox |
+#           -> Minos verdict -> [Hephaestus retry -> Minos sandboxes -> Minos verdict] -> Clio (capsule) -> Publish
+#
+# Modes: scan (Argus, then dashboard and proposal issues), plan (Argus, Athena, then a plan comment), run (all).
 on:
   workflow_dispatch:
     inputs:
@@ -14,9 +20,9 @@ on:
         required: false
         default: ""
       mode:
-        description: run = migrate and open a draft PR; scan = rank dependencies and update the dashboard
+        description: scan = rank and propose; plan = read-only plan; run = migrate and open a draft PR
         type: choice
-        options: [run, scan]
+        options: [run, plan, scan]
         default: run
       issue_number:
         description: Issue to comment on with the result (optional)
@@ -32,12 +38,19 @@ permissions:
   contents: read
 
 concurrency:
-  group: themis-${{ github.event.inputs.repository || github.event.client_payload.repository }}-${{ github.event.inputs.package || github.event.client_payload.package || 'recommended' }}
+  group: themis-${{ github.event.inputs.repository || github.event.client_payload.repository || 'rescan' }}-${{ github.event.inputs.package || github.event.client_payload.package || 'recommended' }}
   cancel-in-progress: false
+
+env:
+  THEMIS_WORKTREE_ROOT: ${{ github.workspace }}/worktrees
+  THEMIS_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+  # One retry round is drawn as its own boxes below.
+  THEMIS_RETRY_CAP: "1"
+  GROQ_MODEL: ${{ vars.GROQ_MODEL || 'openai/gpt-oss-120b' }}
 
 jobs:
   prepare:
-    name: Prepare target (read-only)
+    name: Prepare · target (read-only)
     if: ${{ github.event_name != 'schedule' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -59,8 +72,8 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$IN_REPOSITORY" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || { echo "::error::invalid repository"; exit 1; }
-          [[ -z "$IN_PACKAGE" || "$IN_PACKAGE" =~ ^(@[a-z0-9~][a-z0-9._~-]*/)?[a-z0-9~][a-z0-9._~-]*$ ]] || { echo "::error::invalid package name"; exit 1; }
-          [[ "$IN_MODE" == "run" || "$IN_MODE" == "scan" ]] || { echo "::error::invalid mode"; exit 1; }
+          [[ -z "$IN_PACKAGE" || "$IN_PACKAGE" =~ ^(@[A-Za-z0-9~][A-Za-z0-9._~-]*/)?[A-Za-z0-9~][A-Za-z0-9._~-]*$ ]] || { echo "::error::invalid package name"; exit 1; }
+          [[ "$IN_MODE" == "run" || "$IN_MODE" == "scan" || "$IN_MODE" == "plan" ]] || { echo "::error::invalid mode"; exit 1; }
           [[ -z "$IN_ISSUE" || "$IN_ISSUE" =~ ^[0-9]+$ ]] || { echo "::error::invalid issue number"; exit 1; }
           {
             echo "repository=$IN_REPOSITORY"
@@ -70,6 +83,12 @@ jobs:
             echo "mode=$IN_MODE"
             echo "issue_number=$IN_ISSUE"
           } >> "$GITHUB_OUTPUT"
+          {
+            echo "## Hermes · Orchestrator"
+            echo "| Repository | Mode | Package | Issue |"
+            echo "|---|---|---|---|"
+            echo "| \`$IN_REPOSITORY\` | $IN_MODE | ${IN_PACKAGE:-recommended by Themis} | ${IN_ISSUE:-none} |"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: App token (contents read)
         id: token
@@ -102,85 +121,259 @@ jobs:
           set -euo pipefail
           header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)"
           git -c "http.https://github.com/.extraheader=$header" clone --depth 1 "https://github.com/$TARGET.git" target
-          tar -czf target.tgz target
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: target-repo
-          path: target.tgz
-          retention-days: 1
-
-  pipeline:
-    name: Pipeline (sandboxed)
-    needs: prepare
-    runs-on: ubuntu-latest
-    timeout-minutes: 120
-    env:
-      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-      GROQ_MODEL: ${{ vars.GROQ_MODEL || 'openai/gpt-oss-120b' }}
-      THEMIS_RETRY_CAP: ${{ vars.THEMIS_RETRY_CAP || '2' }}
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-
-      - uses: pnpm/action-setup@v6
-
-      - uses: actions/setup-node@v7
-        with:
-          node-version: "22"
-          cache: pnpm
-
-      - name: Build Themis
-        run: |
-          pnpm install --frozen-lockfile
-          pnpm --filter @themis/core build
-
-      - name: Install analysis tools
-        run: scripts/install-tools.sh "$HOME/.local/bin" && echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-
-      - uses: actions/download-artifact@v8
-        with:
-          name: target-repo
-
-      - name: Run Themis
-        id: themis
-        env:
-          MODE: ${{ needs.prepare.outputs.mode }}
-          PACKAGE: ${{ needs.prepare.outputs.package }}
-        run: |
-          set -uo pipefail
-          tar -xzf target.tgz
+          git -C target remote set-url origin "https://github.com/$TARGET.git"
           git -C target config user.name "themis[bot]"
           git -C target config user.email "themis-bot@users.noreply.github.com"
-          args=(--json -C target "$MODE")
-          [[ -n "$PACKAGE" ]] && args+=("$PACKAGE")
-          node packages/core/dist/cli.js "${args[@]}" > result.json
-          status=$?
-          cat result.json
-          run_dir=$(node -e 'const r=require("./result.json"); process.stdout.write(r.runDir||"")')
-          branch=$(node -e 'const r=require("./result.json"); process.stdout.write(r.branch||"")')
-          mkdir -p out
-          cp result.json out/
-          [[ -n "$run_dir" && -d "$run_dir" ]] && cp -r "$run_dir" out/run
-          if [[ -n "$branch" ]] && git -C target rev-parse --verify --quiet "refs/heads/$branch" >/dev/null; then
-            base=$(git -C target rev-parse HEAD)
-            git -C target bundle create ../out/themis.bundle "$base..refs/heads/$branch"
-          fi
-          exit $status
+          mkdir -p worktrees
+          tar -czf state.tgz target worktrees
 
       - uses: actions/upload-artifact@v7
+        with:
+          name: state-prepare
+          path: state.tgz
+          retention-days: 1
+
+  argus:
+    name: Argus · Scout
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      run_dir: ${{ steps.scout.outputs.run_dir }}
+      recommended: ${{ steps.scout.outputs.recommended }}
+      state: ${{ steps.handover.outputs.state }}
+    env:
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+    steps:
+      - uses: actions/checkout@v7
+        with: { persist-credentials: false }
+      - uses: ./.github/actions/themis-setup
+        with: { state: state-prepare }
+      - name: Rank dependencies
+        id: scout
+        env:
+          PACKAGE: ${{ needs.prepare.outputs.package }}
+        run: node packages/core/dist/cli.js -C target stage scout ${PACKAGE:+"$PACKAGE"}
+      - name: Hand over
+        run: tar -czf state.tgz target worktrees
+      - uses: actions/upload-artifact@v7
+        with: { name: state-argus, path: state.tgz, retention-days: 1 }
+      - id: handover
+        run: echo "state=state-argus" >> "$GITHUB_OUTPUT"
+
+  athena:
+    name: Athena · Planner
+    needs: [prepare, argus]
+    if: ${{ needs.prepare.outputs.mode != 'scan' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      feasible: ${{ steps.plan.outputs.feasible }}
+      dependency: ${{ steps.plan.outputs.dependency }}
+      state: ${{ steps.handover.outputs.state }}
+    env:
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+    steps:
+      - uses: actions/checkout@v7
+        with: { persist-credentials: false }
+      - uses: ./.github/actions/themis-setup
+        with: { state: state-argus }
+      - name: Map usage and plan
+        id: plan
+        run: node packages/core/dist/cli.js stage plan "${{ needs.argus.outputs.run_dir }}"
+      - name: Hand over
+        run: tar -czf state.tgz target worktrees
+      - uses: actions/upload-artifact@v7
+        with: { name: state-athena, path: state.tgz, retention-days: 1 }
+      - id: handover
+        run: echo "state=state-athena" >> "$GITHUB_OUTPUT"
+
+  hephaestus:
+    name: Hephaestus · Migrator
+    needs: [prepare, argus, athena]
+    if: ${{ needs.prepare.outputs.mode == 'run' && needs.athena.outputs.feasible == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    outputs:
+      state: ${{ steps.handover.outputs.state }}
+    env:
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+    steps:
+      - uses: actions/checkout@v7
+        with: { persist-credentials: false }
+      - uses: ./.github/actions/themis-setup
+        with: { state: state-athena }
+      - name: Branch, edit and pin behaviour
+        run: node packages/core/dist/cli.js stage migrate "${{ needs.argus.outputs.run_dir }}"
+      - name: Hand over
+        run: tar -czf state.tgz target worktrees
+      - uses: actions/upload-artifact@v7
+        with: { name: state-hephaestus, path: state.tgz, retention-days: 1 }
+      - id: handover
+        run: echo "state=state-hephaestus" >> "$GITHUB_OUTPUT"
+
+  minos-sandbox:
+    name: Minos · ${{ matrix.side }} sandbox
+    needs: [argus, hephaestus]
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        side: [baseline, candidate]
+    steps:
+      - uses: actions/checkout@v7
+        with: { persist-credentials: false }
+      - uses: ./.github/actions/themis-setup
+        with: { state: state-hephaestus }
+      - name: Build and check in Docker
+        run: node packages/core/dist/cli.js stage verify "${{ needs.argus.outputs.run_dir }}" --side "${{ matrix.side }}"
+      - name: Hand over this side
         if: always()
+        run: tar -czf side.tgz -C target .themis
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with: { name: "side-${{ matrix.side }}", path: side.tgz, retention-days: 1 }
+
+  minos-verdict:
+    name: Minos · Verdict
+    needs: [argus, hephaestus, minos-sandbox]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      retry: ${{ steps.judge.outputs.retry }}
+      passed: ${{ steps.judge.outputs.passed }}
+      state: ${{ steps.handover.outputs.state }}
+    steps:
+      - uses: actions/checkout@v7
+        with: { persist-credentials: false }
+      - uses: ./.github/actions/themis-setup
+        with: { state: state-hephaestus }
+      - uses: actions/download-artifact@v8
+        with: { pattern: "side-*", path: sides }
+      - name: Merge both sandboxes
+        env:
+          RUN: ${{ needs.argus.outputs.run_dir }}
+        run: node scripts/merge-sides.mjs "$RUN" sides/side-baseline/side.tgz sides/side-candidate/side.tgz
+      - name: Judge the delta
+        id: judge
+        run: node packages/core/dist/cli.js stage judge "${{ needs.argus.outputs.run_dir }}"
+      - name: Hand over
+        run: tar -czf state.tgz target worktrees
+      - uses: actions/upload-artifact@v7
+        with: { name: state-verdict, path: state.tgz, retention-days: 1 }
+      - id: handover
+        run: echo "state=state-verdict" >> "$GITHUB_OUTPUT"
+
+  hephaestus-retry:
+    name: Hephaestus · Migrator (retry)
+    needs: [argus, minos-verdict]
+    if: ${{ needs.minos-verdict.outputs.retry == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+    steps:
+      - uses: actions/checkout@v7
+        with: { persist-credentials: false }
+      - uses: ./.github/actions/themis-setup
+        with: { state: state-verdict }
+      - name: Fix what Minos vetoed
+        run: node packages/core/dist/cli.js stage migrate "${{ needs.argus.outputs.run_dir }}"
+      - name: Hand over
+        run: tar -czf state.tgz target worktrees
+      - uses: actions/upload-artifact@v7
+        with: { name: state-hephaestus-retry, path: state.tgz, retention-days: 1 }
+
+  minos-sandbox-retry:
+    name: Minos · ${{ matrix.side }} sandbox (retry)
+    needs: [argus, hephaestus-retry]
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        side: [baseline, candidate]
+    steps:
+      - uses: actions/checkout@v7
+        with: { persist-credentials: false }
+      - uses: ./.github/actions/themis-setup
+        with: { state: state-hephaestus-retry }
+      - name: Build and check in Docker
+        run: node packages/core/dist/cli.js stage verify "${{ needs.argus.outputs.run_dir }}" --side "${{ matrix.side }}"
+      - name: Hand over this side
+        if: always()
+        run: tar -czf side.tgz -C target .themis
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with: { name: "retry-side-${{ matrix.side }}", path: side.tgz, retention-days: 1 }
+
+  minos-verdict-retry:
+    name: Minos · Verdict (retry)
+    needs: [argus, hephaestus-retry, minos-sandbox-retry]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      state: ${{ steps.handover.outputs.state }}
+    steps:
+      - uses: actions/checkout@v7
+        with: { persist-credentials: false }
+      - uses: ./.github/actions/themis-setup
+        with: { state: state-hephaestus-retry }
+      - uses: actions/download-artifact@v8
+        with: { pattern: "retry-side-*", path: sides }
+      - name: Merge both sandboxes
+        env:
+          RUN: ${{ needs.argus.outputs.run_dir }}
+        run: node scripts/merge-sides.mjs "$RUN" sides/retry-side-baseline/side.tgz sides/retry-side-candidate/side.tgz
+      - name: Judge the delta
+        run: node packages/core/dist/cli.js stage judge "${{ needs.argus.outputs.run_dir }}"
+      - name: Hand over
+        run: tar -czf state.tgz target worktrees
+      - uses: actions/upload-artifact@v7
+        with: { name: state-verdict-retry, path: state.tgz, retention-days: 1 }
+      - id: handover
+        run: echo "state=state-verdict-retry" >> "$GITHUB_OUTPUT"
+
+  clio:
+    name: Clio · Capsule writer
+    needs:
+      [prepare, argus, athena, hephaestus, minos-sandbox, minos-verdict, hephaestus-retry, minos-sandbox-retry, minos-verdict-retry]
+    if: ${{ always() && needs.prepare.outputs.mode == 'run' && needs.argus.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      state: ${{ steps.handover.outputs.state }}
+    steps:
+      - uses: actions/checkout@v7
+        with: { persist-credentials: false }
+      - uses: ./.github/actions/themis-setup
+        with:
+          tools: "false"
+          # The latest state any agent handed over.
+          state: ${{ needs.minos-verdict-retry.outputs.state || needs.minos-verdict.outputs.state || (needs.hephaestus.result == 'success' && needs.hephaestus.outputs.state) || needs.athena.outputs.state || needs.argus.outputs.state }}
+      - name: Write the capsule
+        env:
+          FAILED: ${{ contains(needs.*.result, 'failure') && 'an earlier agent job failed; see the run log' || '' }}
+        run: node packages/core/dist/cli.js stage capsule "${{ needs.argus.outputs.run_dir }}" ${FAILED:+--error "$FAILED"}
+      - name: Upload run record
+        uses: actions/upload-artifact@v7
         with:
           name: themis-run
-          path: out
+          path: target/.themis/runs
           retention-days: 14
           include-hidden-files: true
+      - name: Hand over
+        run: tar -czf state.tgz target worktrees
+      - uses: actions/upload-artifact@v7
+        with: { name: state-clio, path: state.tgz, retention-days: 1 }
+      - id: handover
+        run: echo "state=state-clio" >> "$GITHUB_OUTPUT"
 
   publish:
-    name: Publish (draft PR, check run, dashboard)
-    needs: [prepare, pipeline]
-    if: ${{ always() && needs.prepare.result == 'success' && needs.pipeline.result != 'cancelled' }}
+    name: Publish · ${{ needs.prepare.outputs.mode == 'scan' && 'dashboard and proposals' || needs.prepare.outputs.mode == 'plan' && 'plan comment' || 'draft PR and check run' }}
+    needs: [prepare, argus, athena, clio]
+    if: ${{ always() && needs.prepare.result == 'success' && needs.argus.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     outputs:
@@ -188,25 +381,12 @@ jobs:
       dashboard_issue: ${{ steps.publish.outputs.dashboard_issue }}
     steps:
       - uses: actions/checkout@v7
+        with: { persist-credentials: false }
+      - uses: ./.github/actions/themis-setup
         with:
-          persist-credentials: false
-
-      - uses: pnpm/action-setup@v6
-
-      - uses: actions/setup-node@v7
-        with:
-          node-version: "22"
-          cache: pnpm
-
-      - name: Build publisher
-        run: |
-          pnpm install --frozen-lockfile
-          pnpm --filter @themis/core --filter @themis/github-app build
-
-      - uses: actions/download-artifact@v8
-        with:
-          name: themis-run
-          path: out
+          tools: "false"
+          github-app: "true"
+          state: ${{ needs.clio.outputs.state || needs.athena.outputs.state || needs.argus.outputs.state }}
 
       - name: App token (write)
         id: token
@@ -221,6 +401,18 @@ jobs:
           permission-checks: write
           permission-issues: write
 
+      - name: Bundle the Themis branch
+        env:
+          RUN: ${{ needs.argus.outputs.run_dir }}
+          RECOMMENDED: ${{ needs.argus.outputs.recommended }}
+        run: |
+          set -uo pipefail
+          branch=$(node -e 'try{process.stdout.write(require(process.argv[1]).branch||"")}catch{}' "$RUN/capsule.json")
+          if [[ -n "$branch" ]] && git -C target rev-parse --verify --quiet "refs/heads/$branch" >/dev/null; then
+            git -C target bundle create ../themis.bundle "$(git -C target rev-parse HEAD)..refs/heads/$branch"
+          fi
+          node -e 'require("fs").writeFileSync("result.json", JSON.stringify({ runDir: process.argv[1], recommended: process.argv[2] }))' "$RUN" "$RECOMMENDED"
+
       - name: Publish results
         id: publish
         env:
@@ -228,19 +420,16 @@ jobs:
           TARGET_REPO: ${{ needs.prepare.outputs.repository }}
           MODE: ${{ needs.prepare.outputs.mode }}
           ISSUE_NUMBER: ${{ needs.prepare.outputs.issue_number }}
-          RESULT_JSON: out/result.json
-          RUN_DIR: out/run
-          BUNDLE: out/themis.bundle
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          RESULT_JSON: result.json
+          RUN_DIR: ${{ needs.argus.outputs.run_dir }}
+          BUNDLE: themis.bundle
+          RUN_URL: ${{ env.THEMIS_RUN_URL }}
           ALERT_WEBHOOK_URL: ${{ secrets.ALERT_WEBHOOK_URL }}
           ALERT_WEBHOOK_SECRET: ${{ secrets.ALERT_WEBHOOK_SECRET }}
-        run: |
-          git config --global user.name "themis[bot]"
-          git config --global user.email "themis-bot@users.noreply.github.com"
-          node apps/github-app/dist/publish.js
+        run: node apps/github-app/dist/publish.js
 
   auto-migrate:
-    name: Queue automatic migration
+    name: Hermes · queue automatic migration
     needs: [prepare, publish]
     if: ${{ needs.publish.outputs.auto_package != '' }}
     runs-on: ubuntu-latest
@@ -264,7 +453,7 @@ jobs:
             -f "client_payload[trigger]=auto"
 
   rescan:
-    name: Weekly rescan
+    name: Hermes · weekly rescan
     if: ${{ github.event_name == 'schedule' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -272,21 +461,9 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-
-      - uses: pnpm/action-setup@v6
-
-      - uses: actions/setup-node@v7
-        with:
-          node-version: "22"
-          cache: pnpm
-
-      - name: Build
-        run: |
-          pnpm install --frozen-lockfile
-          pnpm --filter @themis/core --filter @themis/github-app build
-
+        with: { persist-credentials: false }
+      - uses: ./.github/actions/themis-setup
+        with: { tools: "false", github-app: "true" }
       - name: Queue scans
         env:
           THEMIS_APP_CLIENT_ID: ${{ vars.THEMIS_APP_CLIENT_ID }}
