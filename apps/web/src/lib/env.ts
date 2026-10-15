@@ -12,7 +12,8 @@ export function requireEnv(name: string): string {
 }
 
 export const env = {
-  appUrl: () => read("APP_URL") ?? "http://localhost:3000",
+  // Trailing slashes would give GitHub a "//api/auth/callback" redirect_uri, which it rejects.
+  appUrl: () => (read("APP_URL") ?? "http://localhost:3000").replace(/\/+$/, ""),
   clientId: () => requireEnv("GITHUB_CLIENT_ID"),
   clientSecret: () => requireEnv("GITHUB_CLIENT_SECRET"),
   sessionSecret: () => requireEnv("SESSION_SECRET"),
