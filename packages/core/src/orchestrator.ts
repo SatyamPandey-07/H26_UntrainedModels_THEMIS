@@ -90,7 +90,9 @@ export async function runThemis(opts: RunOptions): Promise<RunOutcome> {
         dependency: opts.dependency,
         config,
       });
-  const llm = opts.llm ?? new GroqClient(config);
+  // Scans work without a model (no rationales); planning and migration need one.
+  const llm = opts.llm ?? (config.groqApiKey ? new GroqClient(config) : undefined);
+  if (!llm && opts.mode !== "scan") new GroqClient(config); // throws the actionable missing-key error
   const hermes = new ClaimBook("hermes");
   const deadline = Date.now() + (opts.timeLimitMinutes ?? 90) * 60_000;
   const checkTime = (next: string) => {
@@ -116,7 +118,7 @@ export async function runThemis(opts: RunOptions): Promise<RunOutcome> {
       ? readJson(ctx, "plan.json", PlanSchema)
       : (
           await stage(ctx, "planner", "plan.json", () =>
-            runPlanner(ctx, llm, outcome.findings as Findings, dependency),
+            runPlanner(ctx, llm as LlmClient, outcome.findings as Findings, dependency),
           )
         ).plan;
     if (opts.mode === "plan") return outcome;
@@ -136,7 +138,14 @@ export async function runThemis(opts: RunOptions): Promise<RunOutcome> {
         const plan = outcome.plan;
         const previous = outcome.migration;
         outcome.migration = await stage(ctx, "migrator", "migration.json", () =>
-          runMigrator(ctx, llm, { findings, plan, sandbox: sandbox as Sandbox, attempt, previous, feedback }),
+          runMigrator(ctx, llm as LlmClient, {
+            findings,
+            plan,
+            sandbox: sandbox as Sandbox,
+            attempt,
+            previous,
+            feedback,
+          }),
         );
         const migration = outcome.migration;
         checkTime(`verification attempt ${attempt}`);

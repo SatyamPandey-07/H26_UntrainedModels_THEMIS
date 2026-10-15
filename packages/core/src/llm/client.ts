@@ -1,4 +1,5 @@
 import Groq from "groq-sdk";
+import { requireGroqKey } from "../config.js";
 import type { ThemisConfig } from "../config.js";
 
 export type ChatMessage = Groq.Chat.Completions.ChatCompletionMessageParam;
@@ -32,7 +33,11 @@ export class GroqClient implements LlmClient {
 
   constructor(config: Pick<ThemisConfig, "groqApiKey" | "groqModel">) {
     // groq-sdk retries 408/409/429/5xx with exponential backoff.
-    this.client = new Groq({ apiKey: config.groqApiKey, maxRetries: 5, timeout: 120_000 });
+    this.client = new Groq({
+      apiKey: requireGroqKey(config as ThemisConfig),
+      maxRetries: 5,
+      timeout: 120_000,
+    });
     this.model = config.groqModel;
   }
 

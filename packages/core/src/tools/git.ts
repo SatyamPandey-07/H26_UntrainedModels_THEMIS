@@ -120,12 +120,24 @@ export async function exportCommit(ctx: RunContext, repoPath: string, commit: st
 
 /** Files modified or created in a working tree (staged or not), relative to its root. */
 export async function dirtyFiles(cwd: string): Promise<string[]> {
-  const out = await gitQuery(cwd, ["status", "--porcelain", "--untracked-files=all"]);
-  return out
-    .split("\n")
-    .filter(Boolean)
-    .map((l) => l.slice(3).replace(/^"|"$/g, ""))
-    .map((p) => (p.includes(" -> ") ? (p.split(" -> ").pop() as string) : p));
+  // -z keeps each entry's two status columns intact (the shared query helper trims leading whitespace).
+  const r = await execa("git", ["status", "--porcelain", "-z", "--untracked-files=all"], {
+    cwd,
+    reject: false,
+    env: scrubbedEnv(),
+    extendEnv: false,
+    stripFinalNewline: false,
+  });
+  if (r.exitCode !== 0) throw new Error(`git status failed: ${String(r.stderr).trim()}`);
+  const entries = String(r.stdout).split("\0").filter(Boolean);
+  const files: string[] = [];
+  for (let i = 0; i < entries.length; i++) {
+    const entry = entries[i] as string;
+    files.push(entry.slice(3));
+    // Renames and copies are followed by the original path, which is not a changed file in the worktree.
+    if (entry[0] === "R" || entry[0] === "C") i++;
+  }
+  return files;
 }
 
 export async function branchExists(cwd: string, branch: string): Promise<boolean> {

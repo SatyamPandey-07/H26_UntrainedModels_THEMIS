@@ -16,7 +16,7 @@ import { slugify } from "../util/misc.js";
 import { runAgent } from "./base.js";
 import { readOnlyTools } from "./fs-tools.js";
 
-interface RuleFile {
+export interface RuleFile {
   rules: Array<Record<string, unknown> & { id: string }>;
 }
 
@@ -30,7 +30,7 @@ const RulesDraft = z.object({
     .describe("Opengrep YAML with fix rules, only for purely mechanical rewrites. Omit when unsure."),
 });
 
-const PlanDraft = z.object({
+export const PlanDraft = z.object({
   strategy: z.enum(["upgrade", "replace"]),
   target: z.object({ name: z.string(), version: z.string() }),
   rationale: z.string(),
@@ -45,7 +45,7 @@ const PlanDraft = z.object({
     .array(z.string())
     .describe("Call sites (file:line symbol) that characterization tests should pin."),
 });
-type PlanDraft = z.infer<typeof PlanDraft>;
+export type PlanDraft = z.infer<typeof PlanDraft>;
 
 /** Deterministic import rule for a package, built from the skill's template patterns. */
 export function importRule(pkg: string): RuleFile {
@@ -71,7 +71,7 @@ export function importRule(pkg: string): RuleFile {
   };
 }
 
-function parseRules(yamlText: string, pkg: string): { rules?: RuleFile; error?: string } {
+export function parseRules(yamlText: string, pkg: string): { rules?: RuleFile; error?: string } {
   let doc: unknown;
   try {
     doc = parseYaml(yamlText.replace(/^```(?:ya?ml)?\s*|\s*```\s*$/g, ""));
@@ -90,7 +90,7 @@ function parseRules(yamlText: string, pkg: string): { rules?: RuleFile; error?: 
   return { rules: { rules } };
 }
 
-function writeRules(ctx: RunContext, name: string, rules: RuleFile): string {
+export function writeRules(ctx: RunContext, name: string, rules: RuleFile): string {
   const dir = join(ctx.runDir, "rules");
   mkdirSync(dir, { recursive: true });
   const path = join(dir, name);
@@ -282,6 +282,49 @@ export async function runPlanner(
   }
   if (!draft) throw new Error("planner produced no plan");
 
+  return finalizePlan(ctx, {
+    findings,
+    dep,
+    usage,
+    files,
+    usageRules,
+    fixRules,
+    usageRulesPath,
+    fixRulesPath,
+    draft,
+    model: planModel,
+    inputs: planInputs,
+    book,
+  });
+}
+
+export interface FinalizePlanInput {
+  findings: Findings;
+  dep: DependencyFinding;
+  usage: UsageSite[];
+  /** Files tracked in git; concern files outside this list are dropped. */
+  files: string[];
+  usageRules: RuleFile;
+  fixRules?: RuleFile;
+  usageRulesPath: string;
+  fixRulesPath?: string;
+  draft: PlanDraft;
+  /** Model that wrote the draft (Groq model id, or "claude-code" in plugin mode). */
+  model: string;
+  inputs: string[];
+  book: ClaimBook;
+}
+
+/**
+ * Deterministic second half of planning, shared by the Groq planner and the plugin's `plan --from` step:
+ * orders concerns, records every model decision as AI-RECOMMENDED, and writes plan.json.
+ */
+export function finalizePlan(ctx: RunContext, input: FinalizePlanInput): PlannerResult {
+  const { findings, dep, usage, files, usageRules, fixRules, usageRulesPath, fixRulesPath, draft, book } =
+    input;
+  const planModel = input.model;
+  const planInputs = input.inputs;
+  const pkg = dep.name;
   // 3. Concerns in the fixed order the Migrator commits them.
   const usageFiles = new Set(usage.map((s) => s.file));
   const concerns: Concern[] = [];

@@ -32,6 +32,8 @@ export interface MigratorInput {
   attempt: number;
   previous?: MigrationResult;
   feedback?: VerifierFeedback;
+  /** Plugin mode: make only the deterministic commits (toolchain, dependency, autofix); Claude does the rest. */
+  deterministicOnly?: boolean;
 }
 
 const EditSummary = z.object({
@@ -97,7 +99,7 @@ function branchName(dependency: string, now = new Date()): string {
   return `themis/${slugify(dependency)}-${d}`;
 }
 
-function isCharacterizationTest(path: string, slug: string): boolean {
+export function isCharacterizationTest(path: string, slug: string): boolean {
   return new RegExp(`(^|/)themis-${slug}\\.characterization\\.test\\.[cm]?[jt]sx?$`).test(path);
 }
 
@@ -108,7 +110,7 @@ export async function runMigrator(
   input: MigratorInput,
 ): Promise<MigrationResult> {
   const { findings, plan, sandbox, attempt } = input;
-  const book = new ClaimBook("hephaestus");
+  const book = new ClaimBook("hephaestus", input.previous?.claims.length ?? 0);
   const slug = slugify(plan.dependency);
   const toolchain = findings.toolchain;
   const pm = toolchain.packageManager;
@@ -270,6 +272,8 @@ export async function runMigrator(
             `Opengrep autofix rewrote ${changed.length} file(s): ${changed.join(", ")}`,
             r,
           );
+      } else if (input.deterministicOnly) {
+        continue;
       } else if (concern.kind === "model-edit") {
         await modelEdit(concern);
       } else if (concern.kind === "tests") {
@@ -315,7 +319,7 @@ export async function runMigrator(
     keptTests,
     discardedTests,
     attempt,
-    claims: book.claims,
+    claims: [...(input.previous?.claims ?? []), ...book.claims],
   });
   writeJson(ctx, `migration-attempt-${attempt}.json`, result);
   writeJson(ctx, "migration.json", result);
@@ -388,6 +392,30 @@ async function generateCharacterizationTests(
     return [];
   }
 
+  return validateCharacterizationTests(ctx, { ...t, files });
+}
+
+export interface TestValidationInput {
+  worktree: string;
+  files: string[];
+  concern: Pick<Concern, "id" | "kind" | "title">;
+  toolchain: Toolchain;
+  sandbox: Sandbox;
+  baseCommit: string;
+  book: ClaimBook;
+  discarded: MigrationResult["discardedTests"];
+  commit: (concern: Pick<Concern, "id" | "kind" | "title">, files: string[]) => Promise<string | undefined>;
+}
+
+/**
+ * Runs each characterization test on the base commit (old dependency) in the sandbox. Passing tests are kept and
+ * committed; failing ones are deleted and listed as gaps, never edited until green (F6).
+ */
+export async function validateCharacterizationTests(
+  ctx: RunContext,
+  t: TestValidationInput,
+): Promise<string[]> {
+  const files = t.files;
   const baseline = await t.sandbox.prepare(ctx, "baseline", t.baseCommit);
   if (baseline.install.exitCode !== 0) {
     for (const f of files) {

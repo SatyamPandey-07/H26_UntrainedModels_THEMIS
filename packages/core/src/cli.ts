@@ -6,6 +6,7 @@ import { loadConfig } from "./config.js";
 import { recommendDependency, runThemis } from "./orchestrator.js";
 import type { RunOutcome } from "./orchestrator.js";
 import { hasJson, loadRun, readJson } from "./run/context.js";
+import { stepBranch, stepCommit, stepMap, stepPlan, stepTests, stepVerify } from "./steps.js";
 import { Findings, MigrationPlan, MigrationResult, Verification } from "./schema/stages.js";
 import type { DependencyFinding } from "./schema/stages.js";
 
@@ -168,6 +169,83 @@ program
     process.stdout.write(
       json ? JSON.stringify({ recommended: rec?.name ?? null }) + "\n" : `${rec?.name ?? "none"}\n`,
     );
+  });
+
+// Step commands: used by the Claude Code plugin, where Claude Code is the model. Each prints JSON.
+const step = program
+  .command("step")
+  .description(
+    "run one pipeline step (for the Claude Code plugin; Claude Code supplies rules, plan, edits and tests)",
+  );
+const printJson = (value: unknown) => process.stdout.write(JSON.stringify(value, null, 2) + "\n");
+
+step
+  .command("map")
+  .argument("<package>", "dependency to map")
+  .option("--rules <file>", "extra Opengrep rules (YAML) written by Claude")
+  .description("scan without a model and map every use of the package; creates the run directory")
+  .action(async (pkg: string, o: { rules?: string }) => {
+    const { repoPath } = common();
+    printJson(await stepMap(repoPath, pkg, o.rules));
+  });
+
+step
+  .command("plan")
+  .argument("<runDir>", "run directory from `step map`")
+  .argument("<draft>", "plan draft JSON written by Claude")
+  .description("validate the plan draft (target must exist on npm) and write plan.json")
+  .action(async (runDir: string, draft: string) => {
+    const plan = await stepPlan(runDir, draft);
+    printJson({
+      strategy: plan.strategy,
+      target: plan.target,
+      feasible: plan.feasible,
+      concerns: plan.concerns,
+    });
+  });
+
+step
+  .command("branch")
+  .argument("<runDir>")
+  .description("create the themis/* branch in a worktree and make the deterministic commits")
+  .action(async (runDir: string) => {
+    const m = await stepBranch(runDir);
+    printJson({ branch: m.branch, worktree: m.worktreePath, commits: m.commits });
+  });
+
+step
+  .command("commit")
+  .argument("<runDir>")
+  .argument("<concernId>", "concern id from plan.json, e.g. edit-1")
+  .argument("<summary>", "one line per file describing the edit")
+  .description("commit the files Claude edited in the worktree for one concern")
+  .action(async (runDir: string, concernId: string, summary: string) => {
+    const m = await stepCommit(runDir, concernId, summary);
+    printJson({ commits: m.commits });
+  });
+
+step
+  .command("tests")
+  .argument("<runDir>")
+  .argument("<files...>", "characterization test files (paths relative to the worktree)")
+  .description("run each test on the base commit; keep and commit only those that pass")
+  .action(async (runDir: string, files: string[]) => {
+    const m = await stepTests(runDir, files);
+    printJson({ kept: m.keptTests, discarded: m.discardedTests });
+  });
+
+step
+  .command("verify")
+  .argument("<runDir>")
+  .description("verify the branch against the base commit and write the capsule")
+  .action(async (runDir: string) => {
+    const out = await stepVerify(runDir);
+    printJson({
+      verdict: out.capsule.verdict,
+      branch: out.capsule.branch,
+      summary: out.capsule.summary,
+      capsule: `${resolve(runDir)}/capsule.md`,
+    });
   });
 
 program.parseAsync().catch((err: unknown) => {

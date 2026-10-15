@@ -6,10 +6,16 @@ import type { CommandResult } from "./command.js";
  * so each tag is paired with the matching evidence kind.
  */
 export class ClaimBook {
-  private counter = 0;
+  private counter: number;
   readonly claims: Claim[] = [];
 
-  constructor(private readonly agent: AgentName) {}
+  /** `startAt` continues numbering after claims an earlier invocation of the same agent already made. */
+  constructor(
+    private readonly agent: AgentName,
+    startAt = 0,
+  ) {
+    this.counter = startAt;
+  }
 
   private push(claim: Omit<Claim, "id" | "agent">): Claim {
     this.counter += 1;

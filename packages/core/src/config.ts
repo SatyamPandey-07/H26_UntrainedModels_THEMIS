@@ -3,9 +3,8 @@ import { dirname, join, resolve } from "node:path";
 import { z } from "zod";
 
 const ConfigSchema = z.object({
-  groqApiKey: z
-    .string({ error: "GROQ_API_KEY is not set (export it or add it to .env)" })
-    .min(1, "GROQ_API_KEY is empty"),
+  /** Optional: without it, scans run without model rationales and the plugin uses Claude Code as the model. */
+  groqApiKey: z.string().min(1).optional(),
   groqModel: z.string().min(1).default("openai/gpt-oss-120b"),
   retryCap: z.coerce.number().int().min(0).max(10).default(2),
   maxOpenPrs: z.coerce.number().int().min(1).max(50).default(3),
@@ -46,7 +45,7 @@ export function loadConfig(cwd: string = process.cwd()): ThemisConfig {
   if (envFile) loadDotenv(envFile);
   const env = process.env;
   const result = ConfigSchema.safeParse({
-    groqApiKey: env.GROQ_API_KEY,
+    groqApiKey: emptyToUndefined(env.GROQ_API_KEY),
     groqModel: emptyToUndefined(env.GROQ_MODEL),
     retryCap: emptyToUndefined(env.THEMIS_RETRY_CAP),
     maxOpenPrs: emptyToUndefined(env.THEMIS_MAX_OPEN_PRS),
@@ -68,4 +67,13 @@ export function scrubbedEnv(extra: Record<string, string> = {}): Record<string, 
     if (v !== undefined && !blocked.test(k)) out[k] = v;
   }
   return { ...out, ...extra };
+}
+
+/** The Groq key, or a clear error for commands that need a model. */
+export function requireGroqKey(config: ThemisConfig): string {
+  if (!config.groqApiKey)
+    throw new Error(
+      "GROQ_API_KEY is not set. Export it or add it to .env, or use the step commands (map, plan --from, branch, commit, tests, verify) with Claude Code as the model.",
+    );
+  return config.groqApiKey;
 }
