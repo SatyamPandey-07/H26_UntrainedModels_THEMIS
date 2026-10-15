@@ -5,7 +5,14 @@ import { z } from "zod";
 const ConfigSchema = z.object({
   /** Optional: without it, scans run without model rationales and the plugin uses Claude Code as the model. */
   groqApiKey: z.string().min(1).optional(),
+  /**
+   * Every configured key, in order: GROQ_API_KEY_1..N, then GROQ_API_KEYS (comma separated), then GROQ_API_KEY.
+   * `groqApiKey` is the first of these.
+   */
+  groqApiKeys: z.array(z.string().min(1)).default([]),
   groqModel: z.string().min(1).default("openai/gpt-oss-120b"),
+  /** Models tried, in order, after the primary on each key. `GROQ_FALLBACK_MODEL=none` disables them. */
+  groqFallbackModels: z.array(z.string().min(1)).default(["qwen/qwen3.8-27b"]),
   retryCap: z.coerce.number().int().min(0).max(10).default(2),
   maxOpenPrs: z.coerce.number().int().min(1).max(50).default(3),
   alertWebhookUrl: z.url().optional(),
@@ -40,13 +47,40 @@ function findDotenv(start: string): string | undefined {
 
 const emptyToUndefined = (v: string | undefined) => (v === undefined || v.trim() === "" ? undefined : v);
 
+/** GROQ_API_KEY_1..N in numeric order, then the comma separated GROQ_API_KEYS, then GROQ_API_KEY; de-duplicated. */
+export function collectGroqKeys(env: NodeJS.ProcessEnv): string[] {
+  const numbered = Object.keys(env)
+    .map((k) => ({ k, m: /^GROQ_API_KEY_(\d+)$/.exec(k) }))
+    .filter((x): x is { k: string; m: RegExpExecArray } => x.m !== null)
+    .sort((a, b) => Number(a.m[1]) - Number(b.m[1]))
+    .map((x) => env[x.k]);
+  const list = (env.GROQ_API_KEYS ?? "").split(/[\s,]+/);
+  const all = [...numbered, ...list, env.GROQ_API_KEY]
+    .map((v) => v?.trim())
+    .filter((v): v is string => Boolean(v));
+  return [...new Set(all)];
+}
+
+function fallbackModels(value: string | undefined): string[] | undefined {
+  const v = emptyToUndefined(value);
+  if (v === undefined) return undefined;
+  if (/^(none|off|false)$/i.test(v.trim())) return [];
+  return v
+    .split(/[\s,]+/)
+    .map((m) => m.trim())
+    .filter(Boolean);
+}
+
 export function loadConfig(cwd: string = process.cwd()): ThemisConfig {
   const envFile = findDotenv(cwd);
   if (envFile) loadDotenv(envFile);
   const env = process.env;
+  const groqApiKeys = collectGroqKeys(env);
   const result = ConfigSchema.safeParse({
-    groqApiKey: emptyToUndefined(env.GROQ_API_KEY),
+    groqApiKey: groqApiKeys[0],
+    groqApiKeys,
     groqModel: emptyToUndefined(env.GROQ_MODEL),
+    groqFallbackModels: fallbackModels(env.GROQ_FALLBACK_MODEL),
     retryCap: emptyToUndefined(env.THEMIS_RETRY_CAP),
     maxOpenPrs: emptyToUndefined(env.THEMIS_MAX_OPEN_PRS),
     alertWebhookUrl: emptyToUndefined(env.ALERT_WEBHOOK_URL),
@@ -73,7 +107,7 @@ export function scrubbedEnv(extra: Record<string, string> = {}): Record<string, 
 export function requireGroqKey(config: ThemisConfig): string {
   if (!config.groqApiKey)
     throw new Error(
-      "GROQ_API_KEY is not set. Export it or add it to .env, or use the step commands (map, plan --from, branch, commit, tests, verify) with Claude Code as the model.",
+      "No Groq API key is set (GROQ_API_KEY, or GROQ_API_KEY_1..N). Export one or add it to .env, or use the step commands (map, plan --from, branch, commit, tests, verify) with Claude Code as the model.",
     );
   return config.groqApiKey;
 }
