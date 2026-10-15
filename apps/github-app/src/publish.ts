@@ -9,7 +9,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { Octokit } from "@octokit/rest";
 import { Capsule, Findings, capsuleRepoPath, recommendDependency, sendAlert } from "@themis/core";
 import type { CheckRunOutput } from "@themis/core";
@@ -149,10 +149,11 @@ async function main(): Promise<void> {
   const token = env("GITHUB_TOKEN");
   const [owner, repo] = env("TARGET_REPO").split("/") as [string, string];
   const mode = env("MODE");
-  const runDir = env("RUN_DIR", false);
+  const runDir = env("RUN_DIR", false) ? resolve(env("RUN_DIR")) : "";
   const runUrl = env("RUN_URL", false) || undefined;
   const issueNumber = Number(env("ISSUE_NUMBER", false)) || undefined;
-  const bundle = env("BUNDLE", false);
+  // Absolute, because git commands below run inside the fresh clone.
+  const bundle = env("BUNDLE", false) ? resolve(env("BUNDLE")) : "";
   const result = readJsonFile<CliResult>(env("RESULT_JSON")) ?? {};
   const octokit = new Octokit({ auth: token, userAgent: "themis-publish" });
   const { data: repoInfo } = await octokit.repos.get({ owner, repo });
