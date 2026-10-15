@@ -10,8 +10,15 @@ The repo (`SatyamPandey-07/H26_UntrainedModels_THEMIS`) is empty except a stub R
 Decisions confirmed with the user:
 - **LLM:** Groq for every agent (own tool-calling loop in TypeScript; replaces the PRD's Claude Agent SDK).
 - **v1 language:** Node.js/TypeScript target repos (npm audit, JS/TS Opengrep mapper).
-- **Sandbox:** real Docker (Docker Desktop WSL integration now on).
-- **Bot:** Probot GitHub App, webhooks via smee.io; user does the manual GitHub steps, guided by me.
+- **Execution:** everything heavy (scanner installs, target `npm ci`, Docker sandboxes, the LLM pipeline) runs on
+  **GitHub Actions runners**, never on the developer machine. Locally: code edits, lint and typecheck only.
+- **Target repo:** a fork of [SatyamPandey-07/WorkSphere](https://github.com/SatyamPandey-07/WorkSphere)
+  (Next.js 16, npm, Jest, ESLint, Node 22). Replaces the earlier `examples/demo-target` fixture.
+- **Sandbox:** Docker on the `ubuntu-latest` runner (Docker preinstalled).
+- **Bot:** Probot GitHub App run inside Actions with `@probot/adapter-github-actions`; the workflow mints an App
+  installation token (`actions/create-github-app-token`) so branches, PRs and Check Runs are authored by the App.
+  No webhook server, smee channel or tunnel is needed.
+- **Pushing:** commits are pushed only when the user says so.
 
 Standing rules: no test files in this repo, no test runs unless asked, lint/type errors always fixed, minimal
 behaviour check after each finished feature, commits rotated randomly across the 3 team authors with no AI
@@ -24,9 +31,9 @@ packages/core/      engine: agents, llm, tools, sandbox, capsule, orchestrator, 
 apps/github-app/    Probot app (thin shell over core)
 plugin/             Claude Code plugin (thin shell over core)
 skills/             15 agentskills.io skill folders (shared by core, app, plugin)
-examples/demo-target/  small Express app using `moment` -> migrate to `dayjs` (demo fixture)
 docker/             sandbox Dockerfile
-scripts/            install-tools.sh (opengrep, osv-scanner, trivy into ~/.local/bin)
+scripts/            install-tools.sh (pinned opengrep, osv-scanner, trivy; run on the Actions runner)
+.github/workflows/  themis-run.yml template copied into the target fork
 ```
 
 ## Progress
@@ -91,7 +98,8 @@ scoped per agent (read-only for Scout/Planner); 429/5xx backoff. Every model out
 with its inputs.
 
 ### 5. Analysis tools and wrappers (`scripts/install-tools.sh`, `core/src/tools/`)
-Install pinned Opengrep, OSV-Scanner, Trivy binaries to `~/.local/bin`. Typed wrappers (via `runCommand`):
+`scripts/install-tools.sh` installs pinned Opengrep, OSV-Scanner and Trivy (checksums verified) **on the Actions
+runner**, never locally; missing tools are reported as UNVERIFIED, not crashes. Typed wrappers (via `runCommand`):
 `osvScan`, `trivyFs`, `npmAudit`, `opengrepRun(rules, target, {autofix})`, `npmRegistryInfo` (deprecation, last
 publish, maintainers, weekly downloads), `gitBlame`. Interfaces `Scanner`, `Mapper`, `Linter` so a second language
 is a new module (PRD extensibility). SonarQube stays a stub behind the interface (cut list #1).
@@ -108,7 +116,7 @@ matches → usage map (file, line, symbol). Then migration strategy: target repl
 concerns, which call sites have deterministic `fix:` rules vs need model edits. Output `plan.json` + rule files.
 
 ### 8. Docker sandbox (`docker/sandbox.Dockerfile`, `core/src/sandbox/`)
-Node 24 image. Per build: copy source, `npm ci` with network, then run with `--network none`, `--memory`,
+Node 22 image (matches WorkSphere `.nvmrc`). Built on the Actions runner. Per build: `git archive` export, `npm ci` with network, then run with `--network none`, `--memory`,
 `--cpus`, `--pids-limit`, `--read-only` source mount + tmpfs workdir. API: `buildImage(ref)`,
 `exec(image, cmd)` (logged through evidence), `startService(image, port)` for probes. Identical setup for both refs.
 
@@ -119,7 +127,10 @@ characterization tests. Characterization tests generated for touched call sites,
 sandbox; only passing ones kept, failures recorded as gaps (F6). Accepts Verifier failure logs on retry.
 
 ### 10. Minos — Verifier (`core/src/agents/verifier.ts`)
-Builds baseline and candidate sandboxes; runs tests, lint, Opengrep, Trivy in both with identical commands;
+Builds baseline and candidate sandboxes; runs tests, lint, Opengrep, Trivy in both with identical commands.
+Tests are scoped to keep runner time sane on WorkSphere: `jest --findRelatedTests <touched files>` plus the
+characterization tests (full suite optional via input). Black-box probes target routes that work without external
+services (DB, Clerk); when none exist, probes are recorded as UNVERIFIED (PRD cut list #2);
 black-box probes (same HTTP requests to both, diff responses, F10); computes delta only (new failures, lint/security
 delta, call-site coverage n of m). Holds veto; on failure returns logs to Migrator up to `THEMIS_RETRY_CAP` (F9),
 then marks unresolved. Output `verification.json` with log paths.
@@ -135,41 +146,50 @@ Capsule always produced, including on failure.
 Sequences Scout → Planner → Migrator ⇄ Verifier → Clio, persists `state.json` after each stage (resumable),
 enforces retry cap and step/time limits, emits alert events. Public API `runThemis({repoPath, dependency?, mode})`
 used by all surfaces. CLI: `themis scan`, `themis plan <pkg>`, `themis run <pkg>`.
-**Gate (PRD):** one dependency verified end to end on `examples/demo-target` before steps 13–14.
+**Gate (PRD):** one dependency verified end to end on the WorkSphere fork via a `workflow_dispatch` run before
+steps 13–14.
 
-### 13. GitHub App (Probot) (`apps/github-app/`)
-Triggers: `issue_comment` `/themis <pkg>`, `issues`/`pull_request` labeled `themis`, `dependabot_alert`,
-weekly schedule. Flow: clone default branch to temp dir → `runThemis` → push branch → draft PR labeled
+### 13. GitHub App (Probot on Actions) (`apps/github-app/`, `.github/workflows/themis-run.yml`)
+Probot app function run by `@probot/adapter-github-actions` inside a workflow committed to the fork.
+Triggers: `issue_comment` `/themis <pkg>`, `issues` labeled `themis`, weekly `schedule`, `workflow_dispatch`
+(input: package). Workflow: checkout fork + Themis repo → install tools → build → mint App token →
+`runThemis` → push branch → draft PR labeled
 `themis` + `ai-generated` → Check Run with annotations on affected lines → capsule committed under `.themis/`.
 Limits: one open Themis PR per dependency, `THEMIS_MAX_OPEN_PRS` concurrency cap, skip fork PRs. Permissions:
-contents, pull requests, checks, issues (write); `app.yml` manifest. Alert webhook: signed (HMAC-SHA256)
+contents, pull requests, checks, issues (write); `app.yml` manifest documents them. Secrets live only in the
+fork's Actions secrets: `GROQ_API_KEY`, `THEMIS_APP_ID`, `THEMIS_APP_PRIVATE_KEY` (optional
+`ALERT_WEBHOOK_URL`, `ALERT_WEBHOOK_SECRET`). Alert webhook: signed (HMAC-SHA256)
 JSON POST for `pr_opened` / `run_completed` / `run_failed`, retried once, never fails the run.
 
 ### 14. Claude Code plugin and READMEs (`plugin/`, all `README.md`)
 Plugin manifest, `/themis` command with `scan|plan|run` calling the core CLI, skills referenced from `skills/`.
-READMEs (root + core + github-app + plugin + demo-target) written with `readmeskill`, Mermaid architecture,
+READMEs (root + core + github-app + plugin) written with `readmeskill`, Mermaid architecture,
 checker passing.
 
 ### 15. End-to-end verification — fork and run the app
-Publish `examples/demo-target` as an upstream repo, fork it, install the GitHub App on the fork, start the app
-locally (`pnpm --filter github-app start` via smee), comment `/themis moment` on an issue in the fork. Expect: branch
-`themis/moment-<date>`, draft PR with capsule body + labels, Check Run with annotations, `.themis/` capsule,
-EXECUTED claims each linking to an existing log, never a write to `main`. Also run `themis run moment` via CLI
-locally against the same fork clone.
+On the WorkSphere fork, entirely on Actions: (a) `workflow_dispatch` scan run → `findings.json` artifact with the
+ranked list; (b) comment `/themis <top-ranked package>` on an issue → workflow run → branch `themis/<pkg>-<date>`,
+draft PR (labels `themis`, `ai-generated`) authored by the App, Check Run with annotations, capsule under `.themis/`
+and as a run artifact, every EXECUTED claim linking to an existing log, no write to `main`.
 
 ## Manual steps for the user (I'll prompt at the right step)
 
-- [ ] 1. **Docker socket (before step 8):** `sudo usermod -aG docker $USER`, then in PowerShell `wsl --shutdown` and reopen.
-- [x] 2. **smee channel (step 13):** open https://smee.io/new, copy URL → `WEBHOOK_PROXY_URL`.
+- [x] 1. **Docker socket:** no longer needed; sandboxes run on Actions runners.
+- [x] 2. **smee channel:** no longer needed; Probot runs inside Actions (harmless if already created).
 - [x] 3. **Register GitHub App (step 13):** run `pnpm --filter github-app start` once → open `http://localhost:3000` →
    "Register GitHub App" (Probot manifest flow writes `APP_ID`, `PRIVATE_KEY`, `WEBHOOK_SECRET` to `.env`).
 - [x] 4. **Fork + install (step 15):** fork the demo-target repo to your account, install the App on the fork only.
 - [ ] 5. **Alerts (optional):** create a webhook receiver (e.g. a webhook.site URL) → `ALERT_WEBHOOK_URL`.
+- [x] 6. **Push access:** local `gh`/git switched to `ayushsshukla` (write access to this repo).
+- [ ] 7. **Fork Actions:** enable Actions on the fork, then disable every inherited WorkSphere workflow so only
+   `themis-run.yml` runs.
+- [ ] 8. **Fork secrets:** `GROQ_API_KEY`, `THEMIS_APP_ID`, `THEMIS_APP_PRIVATE_KEY` in the fork's Actions secrets.
+- [ ] 9. **App permissions check:** Contents, Pull requests, Checks, Issues = Read and write; Metadata = Read.
 
 ## Verification
 
 - Per feature (after it's complete): `pnpm lint && pnpm typecheck` clean, plus a minimal behaviour check
-  (e.g. `themis scan` on `examples/demo-target` prints ranked findings; capsule gate downgrades a fake
-  EXECUTED claim with a missing log).
+  that needs no installs (e.g. capsule gate downgrades a fake EXECUTED claim with a missing log). Anything needing
+  scanners, Docker or the target repo is checked through a workflow run on the fork.
 - Final: step 15 end to end, with the success metrics from the PRD checked in the produced capsule:
   verified-claim rate 100%, baseline recorded before judgement, 0 unreviewed regressions, call-site coverage reported.
