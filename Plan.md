@@ -33,7 +33,7 @@ scripts/            install-tools.sh (opengrep, osv-scanner, trivy into ~/.local
 
 - [x] 1. Workspace scaffold and secrets
 - [x] 2. Contracts, run state and evidence logging
-- [ ] 3. Skills (15, agentskills.io format)
+- [x] 3. Skills (15, agentskills.io format)
 - [ ] 4. Groq LLM client and agent loop
 - [ ] 5. Analysis tools and wrappers
 - [ ] 6. Argus — Scout
@@ -79,7 +79,7 @@ Agent skills: `stage-routing`, `retry-policy`, `toolchain-detect`, `dependency-r
 Each: valid `name` = folder, description ≤1024 chars with triggers, `compatibility` where tools needed,
 `scripts/` wrappers, `references/` (e.g. Opengrep rule patterns), `assets/` (capsule.md + PR body templates).
 Loader in `core/src/skills/loader.ts` parses frontmatter and returns owner + shared skills per agent.
-Validate with `uvx skills-ref validate` (fallback: own frontmatter check) via `pnpm skills:validate`.
+Validate with `pnpm skills:validate` (spec rules implemented in `core/src/skills/validate.ts`; the official `skills-ref` could not be fetched offline).
 Use the `agentskills` MCP (`search_agent_skills`) while drafting.
 
 ### 4. Groq LLM client and agent loop (`core/src/llm/`, `core/src/agents/base.ts`)
@@ -161,7 +161,7 @@ locally against the same fork clone.
 
 - [ ] 1. **Docker socket (before step 8):** `sudo usermod -aG docker $USER`, then in PowerShell `wsl --shutdown` and reopen.
 - [x] 2. **smee channel (step 13):** open https://smee.io/new, copy URL → `WEBHOOK_PROXY_URL`.
-- [ ] 3. **Register GitHub App (step 13):** run `pnpm --filter github-app start` once → open `http://localhost:3000` →
+- [x] 3. **Register GitHub App (step 13):** run `pnpm --filter github-app start` once → open `http://localhost:3000` →
    "Register GitHub App" (Probot manifest flow writes `APP_ID`, `PRIVATE_KEY`, `WEBHOOK_SECRET` to `.env`).
 - [ ] 4. **Fork + install (step 15):** fork the demo-target repo to your account, install the App on the fork only.
 - [ ] 5. **Alerts (optional):** create a webhook receiver (e.g. a webhook.site URL) → `ALERT_WEBHOOK_URL`.

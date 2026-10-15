@@ -11,12 +11,14 @@
     "typecheck": "pnpm -r run typecheck",
     "lint": "eslint .",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "skills:validate": "tsx packages/core/src/skills/validate.ts skills"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
     "@types/node": "26.6.5",
     "eslint": "10.12.0",
+    "globals": "17.13.0",
     "prettier": "3.9.10",
     "tsx": "4.23.15",
     "typescript": "6.0.3",
