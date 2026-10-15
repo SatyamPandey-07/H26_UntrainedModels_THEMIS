@@ -1,0 +1,15 @@
+{
+  "name": "@themis/github-app",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Themis GitHub App: webhook server, dashboard and publish step",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@octokit/rest": "22.0.1",
+    "@themis/core": "workspace:*"
+  }
+}

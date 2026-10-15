@@ -1,0 +1,231 @@
+name: Themis runner
+
+# Runs the Themis pipeline against a repository where the Themis GitHub App is installed.
+# Started by the App's webhook server (repository_dispatch) or by hand (workflow_dispatch).
+on:
+  workflow_dispatch:
+    inputs:
+      repository:
+        description: Target repository (owner/name) with the Themis App installed
+        required: true
+      package:
+        description: Dependency to migrate (empty = Themis picks the recommended one)
+        required: false
+        default: ""
+      mode:
+        description: run = migrate and open a draft PR; scan = rank dependencies and update the dashboard
+        type: choice
+        options: [run, scan]
+        default: run
+      issue_number:
+        description: Issue to comment on with the result (optional)
+        required: false
+        default: ""
+  repository_dispatch:
+    types: [themis-run]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: themis-${{ github.event.inputs.repository || github.event.client_payload.repository }}-${{ github.event.inputs.package || github.event.client_payload.package || 'recommended' }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Prepare target (read-only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      repository: ${{ steps.inputs.outputs.repository }}
+      owner: ${{ steps.inputs.outputs.owner }}
+      name: ${{ steps.inputs.outputs.name }}
+      package: ${{ steps.inputs.outputs.package }}
+      mode: ${{ steps.inputs.outputs.mode }}
+      issue_number: ${{ steps.inputs.outputs.issue_number }}
+    steps:
+      - name: Validate inputs
+        id: inputs
+        env:
+          IN_REPOSITORY: ${{ github.event.inputs.repository || github.event.client_payload.repository }}
+          IN_PACKAGE: ${{ github.event.inputs.package || github.event.client_payload.package }}
+          IN_MODE: ${{ github.event.inputs.mode || github.event.client_payload.mode || 'run' }}
+          IN_ISSUE: ${{ github.event.inputs.issue_number || github.event.client_payload.issue_number }}
+        run: |
+          set -euo pipefail
+          [[ "$IN_REPOSITORY" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || { echo "::error::invalid repository"; exit 1; }
+          [[ -z "$IN_PACKAGE" || "$IN_PACKAGE" =~ ^(@[a-z0-9~][a-z0-9._~-]*/)?[a-z0-9~][a-z0-9._~-]*$ ]] || { echo "::error::invalid package name"; exit 1; }
+          [[ "$IN_MODE" == "run" || "$IN_MODE" == "scan" ]] || { echo "::error::invalid mode"; exit 1; }
+          [[ -z "$IN_ISSUE" || "$IN_ISSUE" =~ ^[0-9]+$ ]] || { echo "::error::invalid issue number"; exit 1; }
+          {
+            echo "repository=$IN_REPOSITORY"
+            echo "owner=${IN_REPOSITORY%%/*}"
+            echo "name=${IN_REPOSITORY##*/}"
+            echo "package=$IN_PACKAGE"
+            echo "mode=$IN_MODE"
+            echo "issue_number=$IN_ISSUE"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: App token (contents read)
+        id: token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.THEMIS_APP_CLIENT_ID }}
+          private-key: ${{ secrets.THEMIS_APP_PRIVATE_KEY }}
+          owner: ${{ steps.inputs.outputs.owner }}
+          repositories: ${{ steps.inputs.outputs.name }}
+          permission-contents: read
+
+      - name: Refuse private targets on a public runner
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          TARGET: ${{ steps.inputs.outputs.repository }}
+          RUNNER_PRIVATE: ${{ github.event.repository.private }}
+        run: |
+          set -euo pipefail
+          private=$(gh api "repos/$TARGET" --jq .private)
+          if [[ "$private" == "true" && "$RUNNER_PRIVATE" != "true" ]]; then
+            echo "::error::$TARGET is private; private repositories need a private runner repository."
+            exit 1
+          fi
+
+      - name: Clone default branch
+        env:
+          TOKEN: ${{ steps.token.outputs.token }}
+          TARGET: ${{ steps.inputs.outputs.repository }}
+        run: |
+          set -euo pipefail
+          header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)"
+          git -c "http.https://github.com/.extraheader=$header" clone --depth 1 "https://github.com/$TARGET.git" target
+          tar -czf target.tgz target
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: target-repo
+          path: target.tgz
+          retention-days: 1
+
+  pipeline:
+    name: Pipeline (sandboxed)
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      GROQ_MODEL: ${{ vars.GROQ_MODEL || 'openai/gpt-oss-120b' }}
+      THEMIS_RETRY_CAP: ${{ vars.THEMIS_RETRY_CAP || '2' }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - name: Build Themis
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm --filter @themis/core build
+
+      - name: Install analysis tools
+        run: scripts/install-tools.sh "$HOME/.local/bin" && echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: target-repo
+
+      - name: Run Themis
+        id: themis
+        env:
+          MODE: ${{ needs.prepare.outputs.mode }}
+          PACKAGE: ${{ needs.prepare.outputs.package }}
+        run: |
+          set -uo pipefail
+          tar -xzf target.tgz
+          git -C target config user.name "themis[bot]"
+          git -C target config user.email "themis-bot@users.noreply.github.com"
+          args=(--json -C target "$MODE")
+          [[ -n "$PACKAGE" ]] && args+=("$PACKAGE")
+          node packages/core/dist/cli.js "${args[@]}" > result.json
+          status=$?
+          cat result.json
+          run_dir=$(node -e 'const r=require("./result.json"); process.stdout.write(r.runDir||"")')
+          branch=$(node -e 'const r=require("./result.json"); process.stdout.write(r.branch||"")')
+          mkdir -p out
+          cp result.json out/
+          [[ -n "$run_dir" && -d "$run_dir" ]] && cp -r "$run_dir" out/run
+          if [[ -n "$branch" ]] && git -C target rev-parse --verify --quiet "refs/heads/$branch" >/dev/null; then
+            base=$(git -C target rev-parse HEAD)
+            git -C target bundle create ../out/themis.bundle "$base..refs/heads/$branch"
+          fi
+          exit $status
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: themis-run
+          path: out
+          retention-days: 14
+          include-hidden-files: true
+
+  publish:
+    name: Publish (draft PR, check run, dashboard)
+    needs: [prepare, pipeline]
+    if: ${{ always() && needs.prepare.result == 'success' && needs.pipeline.result != 'cancelled' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - name: Build publisher
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm --filter @themis/core --filter @themis/github-app build
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: themis-run
+          path: out
+
+      - name: App token (write)
+        id: token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.THEMIS_APP_CLIENT_ID }}
+          private-key: ${{ secrets.THEMIS_APP_PRIVATE_KEY }}
+          owner: ${{ needs.prepare.outputs.owner }}
+          repositories: ${{ needs.prepare.outputs.name }}
+          permission-contents: write
+          permission-pull-requests: write
+          permission-checks: write
+          permission-issues: write
+
+      - name: Publish results
+        env:
+          GITHUB_TOKEN: ${{ steps.token.outputs.token }}
+          TARGET_REPO: ${{ needs.prepare.outputs.repository }}
+          MODE: ${{ needs.prepare.outputs.mode }}
+          ISSUE_NUMBER: ${{ needs.prepare.outputs.issue_number }}
+          RESULT_JSON: out/result.json
+          RUN_DIR: out/run
+          BUNDLE: out/themis.bundle
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          ALERT_WEBHOOK_URL: ${{ secrets.ALERT_WEBHOOK_URL }}
+          ALERT_WEBHOOK_SECRET: ${{ secrets.ALERT_WEBHOOK_SECRET }}
+        run: |
+          git config --global user.name "themis[bot]"
+          git config --global user.email "themis-bot@users.noreply.github.com"
+          node apps/github-app/dist/publish.js

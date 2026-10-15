@@ -256,13 +256,18 @@ the plugin in a scratch Claude Code session on a clone and run `/themis` (on the
 
 ### Remaining progress
 
+Priority: a live run on GitHub first (workflow run, draft PR, Check Run and comment visible on the WorkSphere
+fork), triggered by hand; automatic triggers and polish follow.
+
 - [x] R1. Finish phase 12 check (CLI scan and plan)
-- [ ] R2. GitHub layer: dashboard, limits, dispatch, publish
-- [ ] R3. Webhook server (Probot on Vercel)
-- [ ] R4. Runner workflow on Actions
+- [x] R4a. Runner workflow (`workflow_dispatch`) and publish step: draft PR, Check Run, issue comment, dashboard (live check at R7a)
+- [ ] R6a. Manual: App private key, runner secrets, install the App on the WorkSphere fork
+- [ ] R7a. First live run on the WorkSphere fork; fix what breaks
+- [ ] R3. Webhook server (Probot on Vercel): `/themis` comments, install-time scan, dashboard ticks
+- [ ] R6b. Manual: deploy to Vercel, point the App webhook at it
+- [ ] R2. Limits and optional `.github/themis.yml` config, weekly rescan
 - [ ] R5. PRIVACY.md and App README
-- [ ] R6. Manual setup: credentials, secrets, Vercel, installs
-- [ ] R7. End-to-end proof on the WorkSphere fork
+- [ ] R7. Install-only end-to-end proof on the WorkSphere fork
 - [ ] R8. Claude Code plugin
 - [ ] R9. GitHub Marketplace listing
 
