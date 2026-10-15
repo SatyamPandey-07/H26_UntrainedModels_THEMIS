@@ -17,7 +17,8 @@ export interface ShapedRequest {
 export interface ChatRequest {
   messages: ChatMessage[];
   tools?: ChatTool[];
-  toolChoice?: "auto" | "required" | "none";
+  /** `{ name }` forces one specific tool (used to make an agent submit its result). */
+  toolChoice?: "auto" | "required" | "none" | { name: string };
   temperature?: number;
   maxTokens?: number;
   /**
@@ -37,6 +38,8 @@ export interface ChatResponse {
   model?: string;
   /** Characters of the prompt view that was sent, for estimator calibration. */
   shapedChars?: number;
+  /** The completion-token cap this request was sent with (explains `finish_reason: length`). */
+  completionCap?: number;
 }
 
 /** Where a client reports key/model switches and persists run-scoped state. */

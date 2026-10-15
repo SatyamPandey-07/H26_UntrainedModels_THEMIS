@@ -142,18 +142,48 @@ export async function runAgent<T>(
     writeFileSync(transcriptPath, JSON.stringify({ model: answeredBy, messages }, null, 2) + "\n");
 
   let invalidSubmissions = 0;
+  let consecutiveDead = 0;
+  let nudged = false;
+  const tally = { toolCalls: 0, rejected: 0, dead: new Map<string, number>() };
+  const summary = () => {
+    const dead = [...tally.dead.values()].reduce((a, b) => a + b, 0);
+    const why = [...tally.dead].map(([reason, n]) => `${reason} x${n}`).join(", ");
+    return [
+      `${tally.toolCalls} tool call(s)`,
+      dead > 0 ? `${dead} turn(s) without a tool call (${why})` : "",
+      tally.rejected > 0 ? `${tally.rejected} rejected result(s)` : "",
+    ]
+      .filter(Boolean)
+      .join(", ");
+  };
   for (let step = 1; step <= maxSteps; step++) {
     const isLast = step === maxSteps;
+    // Out of exploration budget, or the model keeps producing no call: make it submit what it has.
+    const forceSubmit = step >= Math.max(2, maxSteps - 2) || consecutiveDead >= 2;
+    if (forceSubmit && !nudged) {
+      nudged = true;
+      messages.push({
+        role: "user",
+        content: `Steps are almost used up. Call ${submitName} now with your best answer from what you have already read; leave out anything you could not verify.`,
+      });
+    }
     const response = await llm.chat({
       messages,
       tools: chatTools,
-      toolChoice: "required",
+      toolChoice: forceSubmit ? { name: submitName } : "required",
       shape: (budget, level) => context.shape(messages, budget, level),
     });
     answeredBy = response.model ?? llm.model;
     if (response.shapedChars) context.calibrate(response.usage.promptTokens, response.shapedChars);
 
     if (response.toolCalls.length === 0) {
+      consecutiveDead += 1;
+      tally.dead.set(response.finishReason, (tally.dead.get(response.finishReason) ?? 0) + 1);
+      logEvent(
+        ctx,
+        `${opts.agent}: ${opts.label} step ${step}/${maxSteps}: no tool call (finish_reason=${response.finishReason}, ` +
+          `${response.usage.completionTokens}/${response.completionCap ?? "?"} completion tokens)`,
+      );
       if (response.content) messages.push({ role: "assistant", content: response.content });
       messages.push({
         role: "user",
@@ -165,6 +195,8 @@ export async function runAgent<T>(
       continue;
     }
 
+    consecutiveDead = 0;
+    tally.toolCalls += response.toolCalls.length;
     messages.push({
       role: "assistant",
       content: response.content || null,
@@ -191,10 +223,11 @@ export async function runAgent<T>(
         if (parsed.success) {
           messages.push({ role: "tool", tool_call_id: call.id, content: "Accepted." });
           save();
-          logEvent(ctx, `${opts.agent}: ${opts.label} done in ${step} step(s)`);
+          logEvent(ctx, `${opts.agent}: ${opts.label} done in ${step} step(s) (${summary()})`);
           return { output: parsed.data, steps: step, transcriptPath, model: answeredBy, inputs };
         }
         invalidSubmissions += 1;
+        tally.rejected += 1;
         const problems = parsed.error.issues
           .map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`)
           .join("; ");
@@ -215,7 +248,7 @@ export async function runAgent<T>(
         if (asResult.success) {
           messages.push({ role: "tool", tool_call_id: call.id, content: "Accepted." });
           save();
-          logEvent(ctx, `${opts.agent}: ${opts.label} done in ${step} step(s)`);
+          logEvent(ctx, `${opts.agent}: ${opts.label} done in ${step} step(s) (${summary()})`);
           return { output: asResult.data, steps: step, transcriptPath, model: answeredBy, inputs };
         }
         messages.push({
@@ -248,5 +281,8 @@ export async function runAgent<T>(
     }
     save();
   }
-  throw new Error(`${opts.agent}/${opts.label}: no valid result after ${maxSteps} steps`);
+  logEvent(ctx, `${opts.agent}: ${opts.label} gave no valid result in ${maxSteps} steps (${summary()})`);
+  throw new Error(
+    `${opts.agent}/${opts.label}: no valid result after ${maxSteps} steps (${summary()}); see agents/${opts.agent}-${opts.label}.json`,
+  );
 }

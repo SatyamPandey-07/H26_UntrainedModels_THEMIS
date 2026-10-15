@@ -66,7 +66,7 @@ export function readOnlyTools(root: string): AgentTool<unknown>[] {
     defineTool({
       name: "read_file",
       description:
-        "Read a repository file with line numbers. Returns at most 250 lines per call; pass start_line and end_line to read further.",
+        "Read a repository file with line numbers. Returns at most 150 lines per call; pass start_line and end_line to read further.",
       parameters: z.object({
         path: z.string(),
         start_line: z.number().int().positive().optional(),
@@ -78,7 +78,7 @@ export function readOnlyTools(root: string): AgentTool<unknown>[] {
         if (statSync(abs).size > MAX_FILE_BYTES) throw new Error(`file too large to read: ${path}`);
         const lines = readFileSync(abs, "utf8").split("\n");
         const start = start_line ?? 1;
-        const end = Math.min(end_line ?? start + 249, lines.length, start + 249);
+        const end = Math.min(end_line ?? start + 149, lines.length, start + 149);
         return numbered(lines.slice(start - 1, end).join("\n"), start);
       },
     }),

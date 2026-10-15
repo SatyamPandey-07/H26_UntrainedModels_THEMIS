@@ -18,8 +18,20 @@ export interface ContextInit {
 }
 
 const DEFAULT_CHARS_PER_TOKEN = 3.0;
-const OMITTED_TOOL = (n: number) =>
-  `[tool output omitted to save tokens (${n} characters); call the tool again if you need it]`;
+/** What is left of an older tool result: which call it was, how large, and how it began. */
+function omittedTool(call: { name: string; args: string } | undefined, content: string): string {
+  const inner = content.replace(/^<untrusted_data[^>]*>\n?/, "");
+  const first = (inner.split("\n").find((l) => l.trim()) ?? "").trim().slice(0, 80);
+  let args = "";
+  try {
+    args = Object.entries(JSON.parse(call?.args ?? "{}") as Record<string, unknown>)
+      .map(([k, v]) => `${k}=${String(v).slice(0, 40)}`)
+      .join(", ");
+  } catch {
+    // unparseable arguments: describe the call by name only
+  }
+  return `[${call?.name ?? "tool"}(${args}) result omitted to save tokens: ${content.length} characters${first ? `, began "${first}"` : ""}. You already saw it; call again only for a different part]`;
+}
 
 interface Rank {
   /** 0 = first to be trimmed, 2 = last. */
@@ -199,6 +211,11 @@ export class ContextManager {
         content: `[Earlier steps were omitted to fit the token budget: ${summary || "tool calls"}. Files you wrote are saved; call read_file again if you need their current contents.]`,
       });
     }
+    const callById = new Map<string, { name: string; args: string }>();
+    for (const m of history)
+      if (m.role === "assistant")
+        for (const c of m.tool_calls ?? [])
+          callById.set(c.id, { name: c.function.name, args: c.function.arguments });
     for (let i = Math.max(2, this.droppedUpTo); i < history.length; i++) {
       const m = history[i] as ChatMessage;
       if (m.role === "assistant" && this.stubAssistant.has(i) && m.tool_calls?.length) {
@@ -210,7 +227,7 @@ export class ContextManager {
           })),
         });
       } else if (m.role === "tool" && this.stubTool.has(i)) {
-        out.push({ ...m, content: OMITTED_TOOL(String(m.content).length) });
+        out.push({ ...m, content: omittedTool(callById.get(m.tool_call_id), String(m.content)) });
       } else out.push(m);
     }
     return out;
