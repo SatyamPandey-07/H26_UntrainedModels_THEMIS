@@ -3,7 +3,7 @@ import { ButtonLink } from "@/components/ui/button";
 
 export default function NotFound() {
   return (
-    <main className="page-wash grid min-h-[100dvh] place-items-center px-4 text-center">
+    <main id="main" className="page-wash grid min-h-[100dvh] place-items-center px-4 text-center">
       <div className="flex flex-col items-center gap-4">
         <Tiko mood="think" size={120} />
         <h1 className="text-3xl font-bold tracking-tight">Tiko looked everywhere</h1>

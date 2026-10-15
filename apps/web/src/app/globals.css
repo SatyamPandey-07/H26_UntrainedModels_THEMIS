@@ -105,6 +105,9 @@
 }
 
 html {
+  /* Keep focused elements clear of the sticky header and Tiko's corner dock. */
+  scroll-padding-top: 5rem;
+  scroll-padding-bottom: 7rem;
   background: var(--bg);
   color: var(--ink);
   -webkit-font-smoothing: antialiased;

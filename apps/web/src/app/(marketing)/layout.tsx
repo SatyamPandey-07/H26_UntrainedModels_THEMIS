@@ -7,7 +7,9 @@ export default async function MarketingLayout({ children }: { children: React.Re
   return (
     <div className="page-wash">
       <SiteNav signedIn={Boolean(session?.user)} />
-      <main>{children}</main>
+      <main id="main" tabIndex={-1} className="outline-none">
+        {children}
+      </main>
       <SiteFooter />
     </div>
   );

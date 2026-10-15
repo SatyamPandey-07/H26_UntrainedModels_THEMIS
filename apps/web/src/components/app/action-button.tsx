@@ -63,7 +63,13 @@ export function ActionButton({
 
   return (
     <span className="inline-flex flex-wrap items-center gap-2">
-      <Button variant={variant} size={size} onClick={start} disabled={state === "busy"}>
+      <Button
+        variant={variant}
+        size={size}
+        onClick={start}
+        disabled={state === "busy"}
+        aria-busy={state === "busy"}
+      >
         {state === "busy" ? <CircleNotch size={15} className="animate-spin" aria-hidden="true" /> : null}
         {label}
       </Button>

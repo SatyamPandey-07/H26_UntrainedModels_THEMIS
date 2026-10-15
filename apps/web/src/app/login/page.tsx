@@ -14,7 +14,7 @@ export default async function Login({
   const { next, error } = await searchParams;
   const href = `/api/auth/login${next ? `?next=${encodeURIComponent(next)}` : ""}`;
   return (
-    <main className="page-wash grid min-h-[100dvh] place-items-center px-4">
+    <main id="main" className="page-wash grid min-h-[100dvh] place-items-center px-4">
       <div className="w-full max-w-md rounded-[28px] border border-border bg-surface p-8 text-center shadow-[var(--shadow)]">
         <div className="flex justify-center">
           <Logo />

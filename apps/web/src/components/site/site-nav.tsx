@@ -3,6 +3,7 @@ import Link from "next/link";
 import { ButtonLink } from "../ui/button";
 import { ThemeToggle } from "../theme-toggle";
 import { Logo } from "./logo";
+import { MobileMenu } from "./mobile-menu";
 
 const links = [
   { href: "/how-it-works", label: "How it works" },
@@ -31,6 +32,7 @@ export function SiteNav({ signedIn }: { signedIn: boolean }) {
           ))}
         </ul>
         <div className="flex items-center gap-1">
+          <MobileMenu links={links} />
           <ThemeToggle />
           {signedIn ? (
             <ButtonLink href="/dashboard" size="sm">
@@ -39,7 +41,7 @@ export function SiteNav({ signedIn }: { signedIn: boolean }) {
           ) : (
             <ButtonLink href="/api/auth/login" size="sm">
               <GithubLogo size={16} weight="bold" aria-hidden="true" />
-              Sign in with GitHub
+              Sign in<span className="hidden sm:inline"> with GitHub</span>
             </ButtonLink>
           )}
         </div>

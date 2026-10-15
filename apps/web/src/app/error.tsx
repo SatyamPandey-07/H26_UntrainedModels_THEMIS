@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 
 export default function ErrorPage({ reset }: { error: Error; reset: () => void }) {
   return (
-    <main className="grid min-h-[60dvh] place-items-center px-4 text-center">
+    <main id="main" className="grid min-h-[60dvh] place-items-center px-4 text-center">
       <div className="flex flex-col items-center gap-4">
         <Tiko mood="think" size={110} />
         <h1 className="text-2xl font-bold tracking-tight">Something went wrong talking to GitHub</h1>

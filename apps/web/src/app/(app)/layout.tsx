@@ -12,8 +12,17 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <aside className="sticky top-0 z-30 flex flex-col gap-4 border-b border-border bg-bg/90 px-3 py-3 backdrop-blur md:h-[100dvh] md:border-b-0 md:border-r md:px-4 md:py-6">
         <div className="flex items-center justify-between px-2">
           <Logo href="/dashboard" />
-          <span className="md:hidden">
+          <span className="flex items-center md:hidden">
             <ThemeToggle />
+            <form action="/api/auth/logout" method="post">
+              <button
+                type="submit"
+                aria-label="Sign out"
+                className="grid size-10 place-items-center rounded-full text-ink-muted hover:bg-surface-2 hover:text-ink"
+              >
+                <SignOut size={18} weight="bold" />
+              </button>
+            </form>
           </span>
         </div>
         <AppNav />
@@ -35,7 +44,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           </form>
         </div>
       </aside>
-      <main className="min-w-0 px-4 py-6 md:px-10 md:py-10">{children}</main>
+      <main id="main" tabIndex={-1} className="min-w-0 px-4 py-6 outline-none md:px-10 md:py-10">
+        {children}
+      </main>
     </div>
   );
 }

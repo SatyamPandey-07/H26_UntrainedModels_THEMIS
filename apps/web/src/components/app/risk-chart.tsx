@@ -1,6 +1,6 @@
 "use client";
 
-import { Bar, BarChart, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Bar, BarChart, Cell, LabelList, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
 export interface RiskPoint {
   name: string;
@@ -23,7 +23,7 @@ export function RiskChart({ data }: { data: RiskPoint[] }) {
       aria-label={`Risk scores: ${data.map((d) => `${d.name} ${d.score}`).join(", ")}`}
     >
       <ResponsiveContainer>
-        <BarChart data={data} layout="vertical" margin={{ left: 8, right: 16, top: 4, bottom: 4 }}>
+        <BarChart data={data} layout="vertical" margin={{ left: 8, right: 40, top: 4, bottom: 4 }}>
           <XAxis type="number" hide domain={[0, "dataMax"]} />
           <YAxis
             type="category"
@@ -46,7 +46,12 @@ export function RiskChart({ data }: { data: RiskPoint[] }) {
               `${label} · ${(payload?.[0]?.payload as RiskPoint | undefined)?.repo ?? ""}`
             }
           />
-          <Bar dataKey="score" radius={[0, 10, 10, 0]} barSize={18}>
+          <Bar dataKey="score" radius={[0, 10, 10, 0]} barSize={18} isAnimationActive={false}>
+            <LabelList
+              dataKey="score"
+              position="right"
+              style={{ fill: "var(--ink)", fontSize: 12, fontWeight: 600 }}
+            />
             {data.map((d, i) => (
               <Cell
                 key={`${d.repo}-${d.name}`}

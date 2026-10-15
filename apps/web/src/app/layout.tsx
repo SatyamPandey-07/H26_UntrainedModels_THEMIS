@@ -21,7 +21,15 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
       </head>
-      <body className="bg-bg text-ink">{children}</body>
+      <body className="bg-bg text-ink">
+        <a
+          href="#main"
+          className="fixed left-4 top-3 z-50 -translate-y-20 rounded-full bg-primary px-4 py-2 text-sm font-semibold text-white transition-transform focus:translate-y-0 dark:text-[#120c2b]"
+        >
+          Skip to content
+        </a>
+        {children}
+      </body>
     </html>
   );
 }
