@@ -54,8 +54,12 @@ export default async function Dashboard() {
   return (
     <div className="mx-auto grid max-w-6xl gap-8">
       <header>
-        <p className="text-sm text-ink-muted">Hello, {user.name?.split(" ")[0] ?? user.login}</p>
-        <h1 className="mt-1 text-3xl font-bold tracking-tight">Your dependency health</h1>
+        <h1 className="text-3xl font-bold tracking-tight">
+          Welcome back, {user.name?.split(" ")[0] ?? user.login}
+        </h1>
+        <p className="mt-1 text-sm text-ink-muted">
+          Dependency health across every repository Themis watches.
+        </p>
       </header>
 
       <div data-tour="stats" className="grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -72,7 +76,7 @@ export default async function Dashboard() {
             }`}
           >
             <s.Icon size={22} weight="duotone" aria-hidden="true" />
-            <p className="mt-4 font-mono text-3xl font-bold">{s.value}</p>
+            <p className="tabular mt-4 text-3xl font-extrabold tracking-tight">{s.value}</p>
             <p className={`text-sm ${i < 2 ? "opacity-80" : "text-ink-muted"}`}>{s.label}</p>
           </Link>
         ))}

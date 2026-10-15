@@ -113,6 +113,30 @@ html {
 body {
   min-height: 100dvh;
   font-family: var(--font-sans);
+  caret-color: var(--primary);
+  accent-color: var(--primary);
+  scrollbar-color: color-mix(in oklab, var(--primary) 35%, transparent) transparent;
+}
+
+h1,
+h2,
+h3 {
+  text-wrap: balance;
+}
+
+p {
+  text-wrap: pretty;
+}
+
+a {
+  text-underline-offset: 3px;
+}
+
+/* Figures line up in tables, stats and durations. */
+table,
+dl,
+.tabular {
+  font-variant-numeric: tabular-nums;
 }
 
 :focus-visible {

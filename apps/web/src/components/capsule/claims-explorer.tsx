@@ -95,10 +95,15 @@ export function ClaimsExplorer({
 
   return (
     <div>
-      <div role="tablist" aria-label="Filter claims by provenance" className="flex flex-wrap gap-2">
+      <div
+        role="group"
+        aria-label="Filter claims by provenance"
+        data-tour="claims-filter"
+        className="flex flex-wrap gap-2"
+      >
         <button
-          role="tab"
-          aria-selected={active === "ALL"}
+          type="button"
+          aria-pressed={active === "ALL"}
           onClick={() => setActive("ALL")}
           className={cn(
             "rounded-full border px-3 py-1 text-xs font-semibold transition-colors",
@@ -112,8 +117,8 @@ export function ClaimsExplorer({
         {TAGS.map((t) => (
           <button
             key={t}
-            role="tab"
-            aria-selected={active === t}
+            type="button"
+            aria-pressed={active === t}
             onClick={() => setActive(t)}
             className={cn(
               "rounded-full ring-2 ring-transparent transition",

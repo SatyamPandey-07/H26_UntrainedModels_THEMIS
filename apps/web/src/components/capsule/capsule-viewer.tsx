@@ -31,7 +31,7 @@ function CoverageRing({ covered, total }: { covered: number; total: number }) {
         />
       </svg>
       <div className="text-center">
-        <div className="font-mono text-lg font-bold">
+        <div className="tabular text-lg font-extrabold">
           {covered}/{total}
         </div>
         <div className="text-[11px] text-ink-muted">call sites</div>

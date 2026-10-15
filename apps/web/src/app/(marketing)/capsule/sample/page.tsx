@@ -32,7 +32,7 @@ export default function SampleCapsulePage() {
             body: "Which package moved, from which version to which.",
           },
           {
-            element: "[role=tablist]",
+            element: "[data-tour=claims-filter]",
             title: "Filter by evidence",
             body: "Show only what was executed, observed, recommended by the model, or unverified.",
           },
