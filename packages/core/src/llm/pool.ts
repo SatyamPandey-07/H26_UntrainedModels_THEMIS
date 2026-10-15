@@ -25,7 +25,7 @@ const DAILY = /tokens per day|requests per day|\(TPD\)|\(RPD\)/i;
 
 export interface PoolOptions {
   keys: string[];
-  /** Primary model first, then fallbacks. Each key tries them in this order. */
+  /** Primary model first, then fallbacks. The primary is tried on every key before any fallback is used. */
   models: string[];
   maxWaitMs?: number;
   /** Overrides the learned per-model token-per-minute limit. */
@@ -88,6 +88,13 @@ function header(h: unknown, name: string): string | undefined {
 }
 
 /** The documented message is "... Limit 8000, Requested 9713 ...". */
+/** "Limit 8000, Used 7200, Requested 2100" from a 429 message, as a short suffix for logs. */
+function limitFigures(text: string): string {
+  const m = /Limit (\d+)(?:, Used (\d+))?(?:, Requested (\d+))?/i.exec(text);
+  if (!m) return "";
+  return ` [limit ${m[1]}${m[2] ? `, used ${m[2]}` : ""}${m[3] ? `, requested ${m[3]}` : ""}]`;
+}
+
 export function parseRequestLimit(message: string): { limit?: number; requested?: number } {
   const limit = /Limit (\d+)/i.exec(message)?.[1];
   const requested = /Requested (\d+)/i.exec(message)?.[1];
@@ -150,7 +157,8 @@ function recoverToolCall(err: unknown): ChatResponse | undefined {
 type Verdict = "next" | "shrink" | "retry";
 
 /**
- * Several Groq API keys, each tried with a primary model and then fallbacks. A rate-limited slot is skipped at
+ * Several Groq API keys. The primary model is tried on key 1, 2, 3 ... and only when every key is rate limited
+ * on it do the fallback models come into play (again key by key). A rate-limited slot is skipped at
  * once (no sleeping while another slot is free); requests are paced against each slot's token-per-minute window;
  * a request that is too large is re-shaped for the model's real limit instead of being rotated away.
  */
@@ -183,18 +191,20 @@ export class GroqPool implements LlmClient {
     this.tpmOverride = opts.tpmLimit;
     this.now = opts.now ?? Date.now;
     this.sleep = opts.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
-    opts.keys.forEach((_, keyIndex) => {
-      for (const model of opts.models)
+    // Primary model on every key first, then each fallback model on every key: an exhausted key moves to the
+    // next key on the same model before any model switch happens.
+    for (const model of opts.models)
+      opts.keys.forEach((_, keyIndex) => {
         this.slots.push({
           keyIndex,
           model,
-          label: `key ${keyIndex + 1}/${this.keyCount} · ${model}`,
+          label: `LLM-${keyIndex + 1} (${model})`,
           coolUntil: 0,
           exhausted: false,
           window: [],
           stats: { calls: 0, promptTokens: 0, completionTokens: 0, rateLimited: 0, tooLarge: 0, errors: 0 },
         });
-    });
+      });
   }
 
   get model(): string {
@@ -400,12 +410,12 @@ export class GroqPool implements LlmClient {
       if (daily || retryAfter > LONG_COOLDOWN_MS) {
         slot.exhausted = true;
         slot.coolReason = `${scope} limit used up`;
-        this.log(`${slot.label}: ${scope} limit used up; skipping it for this run`);
+        this.log(`${slot.label}: ${scope} limit used up${limitFigures(text)}; skipping it for this run`);
       } else {
         slot.coolUntil = now + retryAfter + 250;
         slot.coolReason = `${scope} limit, retry in ${Math.ceil(retryAfter / 1000)}s`;
         this.log(
-          `${slot.label}: ${scope} limit; retry in ${Math.ceil(retryAfter / 1000)}s, trying the next slot`,
+          `${slot.label}: ${scope} limit${limitFigures(text)}; retry in ${Math.ceil(retryAfter / 1000)}s, trying the next slot`,
         );
       }
       this.persist();
@@ -426,9 +436,7 @@ export class GroqPool implements LlmClient {
     if (status === 401 || status === 403) {
       slot.stats.errors += 1;
       this.deadKeys.add(slot.keyIndex);
-      this.log(
-        `key ${slot.keyIndex + 1}/${this.keyCount} was rejected (${status}); dropping it for this run`,
-      );
+      this.log(`LLM-${slot.keyIndex + 1} was rejected (${status}); dropping it for this run`);
       this.persist();
       return "next";
     }
@@ -548,6 +556,10 @@ export class GroqPool implements LlmClient {
     const completionTokens = data.usage?.completion_tokens ?? 0;
     const cached = data.usage?.prompt_tokens_details?.cached_tokens ?? 0;
     slot.window.push({ at: now, tokens: Math.max(0, prompt - cached) + completionTokens });
+    this.log(
+      `${slot.label}: ${prompt} prompt + ${completionTokens} completion tokens` +
+        `${cached ? ` (${cached} cached)` : ""}; last minute ${this.windowUsed(slot, now)}/${this.limitFor(slot.model)}`,
+    );
     slot.stats.calls += 1;
     slot.stats.promptTokens += prompt;
     slot.stats.completionTokens += completionTokens;

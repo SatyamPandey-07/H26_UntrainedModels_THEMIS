@@ -242,9 +242,9 @@ so a repository with `package.json` runs exactly as before. Ecosystem choice: `p
   the primary ecosystem and report the other as a gap.
 
 ### 17. Groq key pool, model fallback and prompt shaping (`packages/core/src/llm/pool.ts`, `agents/context.ts`)
-- **Keys and models:** `GROQ_API_KEY_1..N` (plus `GROQ_API_KEYS`, `GROQ_API_KEY`); every key tries `GROQ_MODEL`
-  (`openai/gpt-oss-120b`) then `GROQ_FALLBACK_MODEL` (`qwen/qwen3.8-27b`; `qwen/qwen3-32b` was withdrawn 2026-07-17).
-  429 moves to the next slot at once; daily limits exclude a slot for the run; 401/403 drop a key; 404 drops a model;
+- **Keys and models:** `GROQ_API_KEY_1..N` (plus `GROQ_API_KEYS`, `GROQ_API_KEY`); `GROQ_MODEL`
+  (`openai/gpt-oss-120b`) is tried on key 1, 2, 3 ... and only then `GROQ_FALLBACK_MODEL` (`qwen/qwen3.8-27b`;
+  `qwen/qwen3-32b` was withdrawn 2026-07-17), again key by key. 429 moves to the next key at once; daily limits exclude a slot for the run; 401/403 drop a key; 404 drops a model;
   413 re-shapes the prompt for the limit Groq reports. Limits are per Groq organization, not per key.
 - **Prompt shaping:** the full history is kept, each request sends a view sized to the model that will answer:
   compact JSON and grouped call sites, executed tool arguments and old results stubbed, blocks trimmed by priority,
