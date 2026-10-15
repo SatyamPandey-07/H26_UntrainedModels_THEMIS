@@ -411,3 +411,21 @@ accept the developer agreement and *Submit for review*. Until approval, share `h
 - R4: `workflow_dispatch` scan of the WorkSphere fork on the runner; artifacts contain `findings.json`.
 - R7 is the acceptance test: install-only flow produces the dashboard and a verified draft PR.
 - R8: in a scratch Claude Code session on a clone, `/plugin install`, `/themis` prints the ranking.
+
+## Frontend (web app)
+
+Full plan: [docs/frontend-plan.md](docs/frontend-plan.md).
+
+- [ ] F0. Install and review design skills; fix the webhook server deployment
+- [ ] F1. `apps/web` scaffold, colour tokens, fonts, light and dark themes
+- [ ] F2. Sign in with GitHub (App OAuth) and protected routes
+- [ ] F3. Repository selection through the App installation flow
+- [ ] F4. GitHub-backed data layer (issues, PRs, checks, runs, artifacts, capsules)
+- [ ] F5. Dashboard and repository pages with Plan, Migrate and Dismiss actions
+- [ ] F6. Runs list and live agent timeline
+- [ ] F7. Capsule viewer
+- [ ] F8. Tiko robot (Rive) and guided tours (driver.js)
+- [ ] F9. Marketing pages in the reference style
+- [ ] F10. `.github/themis.yml` settings editor
+- [ ] F11. Polish and accessibility pass
+- [ ] F12. Deploy and document
