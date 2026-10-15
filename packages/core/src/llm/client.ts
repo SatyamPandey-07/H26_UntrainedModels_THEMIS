@@ -32,7 +32,8 @@ const REASONING_EFFORT = (process.env.THEMIS_REASONING_EFFORT ?? "low") as "low"
 
 export class GroqClient implements LlmClient {
   private readonly client: Groq;
-  readonly model: string;
+  model: string;
+  private readonly fallbackModel = process.env.GROQ_FALLBACK_MODEL ?? "openai/gpt-oss-20b";
 
   constructor(config: Pick<ThemisConfig, "groqApiKey" | "groqModel">) {
     // groq-sdk retries 408/409/429/5xx with exponential backoff.
@@ -51,6 +52,14 @@ export class GroqClient implements LlmClient {
     } catch (err) {
       const recovered = recoverToolCall(err);
       if (recovered) return recovered;
+      // A model's daily token allowance is exhausted: continue on the fallback model, which has its own.
+      if (isDailyLimit(err) && this.fallbackModel && this.model !== this.fallbackModel) {
+        process.stderr.write(
+          `[themis] ${this.model} reached its daily token limit; switching to ${this.fallbackModel}\n`,
+        );
+        this.model = this.fallbackModel;
+        return this.chat(request);
+      }
       throw err;
     }
     const choice = completion.choices[0];
@@ -82,6 +91,12 @@ export class GroqClient implements LlmClient {
 }
 
 let recoveredSeq = 0;
+
+function isDailyLimit(err: unknown): boolean {
+  return (
+    err instanceof Groq.RateLimitError && /tokens per day|requests per day|\(TPD\)|\(RPD\)/i.test(err.message)
+  );
+}
 
 /**
  * gpt-oss models occasionally emit a tool call under a channel name (e.g. "commentary") that is not a

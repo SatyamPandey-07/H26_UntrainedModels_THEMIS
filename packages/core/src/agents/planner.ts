@@ -183,7 +183,10 @@ export async function runPlanner(
       eco.opengrepExcludes,
     );
     if (outcome.ok) {
-      usage = outcome.data;
+      // Model-written call rules can over-match (any `$M(...)`); only files that import the package count.
+      usage = importingFiles.length
+        ? outcome.data.filter((s) => importingFiles.includes(s.file))
+        : outcome.data;
       const missed = importingFiles.filter((f) => !usage.some((s) => s.file === f));
       if (missed.length === 0 || attempt === 1) {
         book.executed(
