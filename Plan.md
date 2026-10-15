@@ -31,7 +31,7 @@ scripts/            install-tools.sh (opengrep, osv-scanner, trivy into ~/.local
 
 ## Progress
 
-- [ ] 1. Workspace scaffold and secrets
+- [x] 1. Workspace scaffold and secrets
 - [ ] 2. Contracts, run state and evidence logging
 - [ ] 3. Skills (15, agentskills.io format)
 - [ ] 4. Groq LLM client and agent loop

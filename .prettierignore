@@ -1,0 +1,7 @@
+dist
+node_modules
+pnpm-lock.yaml
+examples
+.themis
+Plan.md
+Themis.pdf
