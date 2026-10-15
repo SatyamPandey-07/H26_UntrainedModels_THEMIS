@@ -32,7 +32,7 @@ function symbolFor(r: NonNullable<OpengrepJson["results"]>[number]): string {
 /** Runs usage rules and returns one site per match (file paths relative to the repo). */
 export const opengrepMapper: Mapper = {
   name: "opengrep",
-  async map(ctx, repoPath, rulesPath): Promise<ToolOutcome<UsageSite[]>> {
+  async map(ctx, repoPath, rulesPath, excludes = []): Promise<ToolOutcome<UsageSite[]>> {
     if (!(await opengrepAvailable(ctx)))
       return { ok: false, unavailable: true, reason: "opengrep is not installed" };
     const r = await runCommand(ctx, {
@@ -48,6 +48,7 @@ export const opengrepMapper: Mapper = {
         "node_modules",
         "--exclude",
         ".themis",
+        ...excludes.flatMap((d) => ["--exclude", d]),
         ".",
       ],
       cwd: repoPath,
@@ -86,7 +87,12 @@ export const opengrepMapper: Mapper = {
 };
 
 /** Applies fix rules in place (Migrator autofix concern). */
-export async function opengrepAutofix(ctx: RunContext, repoPath: string, rulesPath: string) {
+export async function opengrepAutofix(
+  ctx: RunContext,
+  repoPath: string,
+  rulesPath: string,
+  excludes: string[] = [],
+) {
   return runCommand(ctx, {
     label: "opengrep-autofix",
     file: "opengrep",
@@ -100,6 +106,7 @@ export async function opengrepAutofix(ctx: RunContext, repoPath: string, rulesPa
       "node_modules",
       "--exclude",
       ".themis",
+      ...excludes.flatMap((d) => ["--exclude", d]),
       ".",
     ],
     cwd: repoPath,

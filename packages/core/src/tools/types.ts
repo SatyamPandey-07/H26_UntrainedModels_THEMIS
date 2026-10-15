@@ -27,7 +27,12 @@ export interface Scanner {
 /** Maps where a dependency is used. */
 export interface Mapper {
   readonly name: string;
-  map(ctx: RunContext, repoPath: string, rulesPath: string): Promise<ToolOutcome<UsageSite[]>>;
+  map(
+    ctx: RunContext,
+    repoPath: string,
+    rulesPath: string,
+    excludes?: string[],
+  ): Promise<ToolOutcome<UsageSite[]>>;
 }
 
 /** Runs a project's linter and counts violations. */
