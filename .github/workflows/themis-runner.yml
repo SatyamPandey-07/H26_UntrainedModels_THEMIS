@@ -144,7 +144,7 @@ jobs:
       recommended: ${{ steps.scout.outputs.recommended }}
       state: ${{ steps.handover.outputs.state }}
     env:
-      # Up to five Groq keys, tried in order; each key tries GROQ_MODEL, then GROQ_FALLBACK_MODEL.
+      # Up to five Groq keys, tried in order on GROQ_MODEL; GROQ_FALLBACK_MODEL is used only when all are rate limited.
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
       GROQ_API_KEY_1: ${{ secrets.GROQ_API_KEY_1 }}
       GROQ_API_KEY_2: ${{ secrets.GROQ_API_KEY_2 }}
@@ -179,7 +179,7 @@ jobs:
       dependency: ${{ steps.plan.outputs.dependency }}
       state: ${{ steps.handover.outputs.state }}
     env:
-      # Up to five Groq keys, tried in order; each key tries GROQ_MODEL, then GROQ_FALLBACK_MODEL.
+      # Up to five Groq keys, tried in order on GROQ_MODEL; GROQ_FALLBACK_MODEL is used only when all are rate limited.
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
       GROQ_API_KEY_1: ${{ secrets.GROQ_API_KEY_1 }}
       GROQ_API_KEY_2: ${{ secrets.GROQ_API_KEY_2 }}
@@ -210,7 +210,7 @@ jobs:
     outputs:
       state: ${{ steps.handover.outputs.state }}
     env:
-      # Up to five Groq keys, tried in order; each key tries GROQ_MODEL, then GROQ_FALLBACK_MODEL.
+      # Up to five Groq keys, tried in order on GROQ_MODEL; GROQ_FALLBACK_MODEL is used only when all are rate limited.
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
       GROQ_API_KEY_1: ${{ secrets.GROQ_API_KEY_1 }}
       GROQ_API_KEY_2: ${{ secrets.GROQ_API_KEY_2 }}
@@ -291,7 +291,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
-      # Up to five Groq keys, tried in order; each key tries GROQ_MODEL, then GROQ_FALLBACK_MODEL.
+      # Up to five Groq keys, tried in order on GROQ_MODEL; GROQ_FALLBACK_MODEL is used only when all are rate limited.
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
       GROQ_API_KEY_1: ${{ secrets.GROQ_API_KEY_1 }}
       GROQ_API_KEY_2: ${{ secrets.GROQ_API_KEY_2 }}

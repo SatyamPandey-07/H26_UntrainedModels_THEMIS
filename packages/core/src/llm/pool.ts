@@ -25,7 +25,7 @@ const DAILY = /tokens per day|requests per day|\(TPD\)|\(RPD\)/i;
 
 export interface PoolOptions {
   keys: string[];
-  /** Primary model first, then fallbacks. Each key tries them in this order. */
+  /** Primary model first, then fallbacks. The primary is tried on every key before any fallback is used. */
   models: string[];
   maxWaitMs?: number;
   /** Overrides the learned per-model token-per-minute limit. */
@@ -150,7 +150,8 @@ function recoverToolCall(err: unknown): ChatResponse | undefined {
 type Verdict = "next" | "shrink" | "retry";
 
 /**
- * Several Groq API keys, each tried with a primary model and then fallbacks. A rate-limited slot is skipped at
+ * Several Groq API keys. The primary model is tried on key 1, 2, 3 ... and only when every key is rate limited
+ * on it do the fallback models come into play (again key by key). A rate-limited slot is skipped at
  * once (no sleeping while another slot is free); requests are paced against each slot's token-per-minute window;
  * a request that is too large is re-shaped for the model's real limit instead of being rotated away.
  */
@@ -183,8 +184,10 @@ export class GroqPool implements LlmClient {
     this.tpmOverride = opts.tpmLimit;
     this.now = opts.now ?? Date.now;
     this.sleep = opts.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
-    opts.keys.forEach((_, keyIndex) => {
-      for (const model of opts.models)
+    // Primary model on every key first, then each fallback model on every key: an exhausted key moves to the
+    // next key on the same model before any model switch happens.
+    for (const model of opts.models)
+      opts.keys.forEach((_, keyIndex) => {
         this.slots.push({
           keyIndex,
           model,
@@ -194,7 +197,7 @@ export class GroqPool implements LlmClient {
           window: [],
           stats: { calls: 0, promptTokens: 0, completionTokens: 0, rateLimited: 0, tooLarge: 0, errors: 0 },
         });
-    });
+      });
   }
 
   get model(): string {
