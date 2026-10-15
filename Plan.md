@@ -15,9 +15,13 @@ Decisions confirmed with the user:
 - **Target repo:** a fork of [SatyamPandey-07/WorkSphere](https://github.com/SatyamPandey-07/WorkSphere)
   (Next.js 16, npm, Jest, ESLint, Node 22). Replaces the earlier `examples/demo-target` fixture.
 - **Sandbox:** Docker on the `ubuntu-latest` runner (Docker preinstalled).
-- **Bot:** Probot GitHub App run inside Actions with `@probot/adapter-github-actions`; the workflow mints an App
-  installation token (`actions/create-github-app-token`) so branches, PRs and Check Runs are authored by the App.
-  No webhook server, smee channel or tunnel is needed.
+- **Distribution (installable by any repo owner):**
+  - **GitHub App (public, "Any account")** backed by one small hosted Probot server. The server only receives
+    events, enforces limits, dispatches the pipeline and opens the draft PR and Check Run as the App. It holds the
+    App private key; owners never see it.
+  - **Themis Action** (`action.yml` in this repo): the heavy pipeline runs on the **owner's own Actions runners**,
+    started by a one-file workflow the owner adds, using the owner's own `GROQ_API_KEY` secret.
+  - **Claude Code plugin** distributed from this repo as a plugin marketplace.
 - **Pushing:** commits are pushed only when the user says so.
 
 Standing rules: no test files in this repo, no test runs unless asked, lint/type errors always fixed, minimal
@@ -33,7 +37,10 @@ plugin/             Claude Code plugin (thin shell over core)
 skills/             15 agentskills.io skill folders (shared by core, app, plugin)
 docker/             sandbox Dockerfile
 scripts/            install-tools.sh (pinned opengrep, osv-scanner, trivy; run on the Actions runner)
-.github/workflows/  themis-run.yml template copied into the target fork
+action.yml          Themis Action (composite) used by owners' workflows
+templates/          themis.yml workflow owners copy into .github/workflows/
+.claude-plugin/     marketplace.json so developers can `/plugin marketplace add` this repo
+render.yaml         hosting blueprint for the Probot server
 ```
 
 ## Progress
@@ -149,42 +156,51 @@ used by all surfaces. CLI: `themis scan`, `themis plan <pkg>`, `themis run <pkg>
 **Gate (PRD):** one dependency verified end to end on the WorkSphere fork via a `workflow_dispatch` run before
 steps 13–14.
 
-### 13. GitHub App (Probot on Actions) (`apps/github-app/`, `.github/workflows/themis-run.yml`)
-Probot app function run by `@probot/adapter-github-actions` inside a workflow committed to the fork.
-Triggers: `issue_comment` `/themis <pkg>`, `issues` labeled `themis`, weekly `schedule`, `workflow_dispatch`
-(input: package). Workflow: checkout fork + Themis repo → install tools → build → mint App token →
-`runThemis` → push branch → draft PR labeled
-`themis` + `ai-generated` → Check Run with annotations on affected lines → capsule committed under `.themis/`.
-Limits: one open Themis PR per dependency, `THEMIS_MAX_OPEN_PRS` concurrency cap, skip fork PRs. Permissions:
-contents, pull requests, checks, issues (write); `app.yml` manifest documents them. Secrets live only in the
-fork's Actions secrets: `GROQ_API_KEY`, `THEMIS_APP_ID`, `THEMIS_APP_PRIVATE_KEY` (optional
-`ALERT_WEBHOOK_URL`, `ALERT_WEBHOOK_SECRET`). Alert webhook: signed (HMAC-SHA256)
-JSON POST for `pr_opened` / `run_completed` / `run_failed`, retried once, never fails the run.
+### 13. GitHub App, Themis Action and owner workflow (`apps/github-app/`, `action.yml`, `templates/themis.yml`)
+**Owner install flow:** install the public App on a repo → copy `templates/themis.yml` to `.github/workflows/` →
+add the `GROQ_API_KEY` Actions secret. Nothing else.
+**Themis Action** (composite): set up Node 22 → install pinned tools (`scripts/install-tools.sh`) → build core →
+`themis run <pkg>` (or `scan`) on the checked-out repo → push `themis/<dep>-<date>` with the workflow's
+`GITHUB_TOKEN` (`contents: write`) → upload `.themis/runs/<id>` as artifact `themis-capsule`.
+**Owner workflow** triggers: `workflow_dispatch` (inputs: `package`, `mode`, sent by the App or by hand) and a
+weekly `schedule` scan. It never runs on `pull_request`, so fork PRs never see secrets.
+**Probot server** (hosted; Render free tier via `render.yaml`, smee for local dev):
+- `issue_comment` `/themis <pkg>` and `issues.labeled` `themis` → check limits (one open Themis PR per dependency,
+  `THEMIS_MAX_OPEN_PRS` cap) → react/acknowledge → dispatch the owner workflow.
+- `workflow_run.completed` for `themis.yml` → download `themis-capsule` → open a **draft** PR from the pushed branch
+  with the capsule PR body, labels `themis` + `ai-generated` → Check Run with conclusion and line annotations →
+  signed alert webhook (`pr_opened` / `run_completed` / `run_failed`, retried once, never fails the run).
+- If the workflow file or secret is missing, comment install instructions instead of failing silently.
+**App permissions:** Contents, Pull requests, Checks, Issues, Actions = Read and write; Metadata = Read.
+**Events:** Issue comment, Issues, Workflow run. Documented in `app.yml` (manifest).
 
-### 14. Claude Code plugin and READMEs (`plugin/`, all `README.md`)
-Plugin manifest, `/themis` command with `scan|plan|run` calling the core CLI, skills referenced from `skills/`.
-READMEs (root + core + github-app + plugin) written with `readmeskill`, Mermaid architecture,
-checker passing.
+### 14. Claude Code plugin and READMEs (`plugin/`, `.claude-plugin/marketplace.json`, all `README.md`)
+Plugin with `/themis scan|plan|run <pkg>` commands calling the core CLI on the developer's checkout, plus the stage
+skills. This repo is a marketplace: `/plugin marketplace add SatyamPandey-07/H26_UntrainedModels_THEMIS` →
+`/plugin install themis@themis`. READMEs (root + core + github-app + plugin) written with `readmeskill`, including
+the three-step owner install guide and Mermaid architecture; checker passing.
 
-### 15. End-to-end verification — fork and run the app
-On the WorkSphere fork, entirely on Actions: (a) `workflow_dispatch` scan run → `findings.json` artifact with the
-ranked list; (b) comment `/themis <top-ranked package>` on an issue → workflow run → branch `themis/<pkg>-<date>`,
-draft PR (labels `themis`, `ai-generated`) authored by the App, Check Run with annotations, capsule under `.themis/`
-and as a run artifact, every EXECUTED claim linking to an existing log, no write to `main`.
+### 15. End-to-end verification — install on the WorkSphere fork like an owner would
+Using only the owner install flow on the fork: install the App, add `templates/themis.yml`, add `GROQ_API_KEY`.
+(a) Run the workflow with `mode=scan` → `themis-capsule` artifact with the ranked findings. (b) Comment
+`/themis <top-ranked package>` on an issue → App acknowledges → workflow runs on the fork's runner → branch
+`themis/<pkg>-<date>` → draft PR authored by the App with labels and capsule body → Check Run with annotations;
+every EXECUTED claim links to an existing log; no write to `main`.
 
 ## Manual steps for the user (I'll prompt at the right step)
 
 - [x] 1. **Docker socket:** no longer needed; sandboxes run on Actions runners.
 - [x] 2. **smee channel:** no longer needed; Probot runs inside Actions (harmless if already created).
-- [x] 3. **Register GitHub App (step 13):** run `pnpm --filter github-app start` once → open `http://localhost:3000` →
-   "Register GitHub App" (Probot manifest flow writes `APP_ID`, `PRIVATE_KEY`, `WEBHOOK_SECRET` to `.env`).
+- [x] 3. **Register GitHub App:** done by the user. Re-check at step 13: public ("Any account"), permissions and
+   events as listed in step 13, webhook URL pointing at the hosted server (smee URL during development).
 - [x] 4. **Fork + install (step 15):** fork the demo-target repo to your account, install the App on the fork only.
 - [ ] 5. **Alerts (optional):** create a webhook receiver (e.g. a webhook.site URL) → `ALERT_WEBHOOK_URL`.
 - [x] 6. **Push access:** local `gh`/git switched to `ayushsshukla` (write access to this repo).
 - [ ] 7. **Fork Actions:** enable Actions on the fork, then disable every inherited WorkSphere workflow so only
-   `themis-run.yml` runs.
-- [ ] 8. **Fork secrets:** `GROQ_API_KEY`, `THEMIS_APP_ID`, `THEMIS_APP_PRIVATE_KEY` in the fork's Actions secrets.
-- [ ] 9. **App permissions check:** Contents, Pull requests, Checks, Issues = Read and write; Metadata = Read.
+   `themis.yml` runs.
+- [ ] 8. **Fork secret:** `GROQ_API_KEY` in the fork's Actions secrets (owner-side, like any installer).
+- [ ] 9. **Host the Probot server:** deploy `render.yaml` on Render (free) with `APP_ID`, `PRIVATE_KEY`,
+   `WEBHOOK_SECRET`; set the App's webhook URL to the Render URL.
 
 ## Verification
 
