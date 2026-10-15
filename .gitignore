@@ -1,0 +1,17 @@
+# Dependencies and build output
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Secrets
+.env
+.env.*
+!.env.example
+*.pem
+
+# Themis run state
+.themis/
+
+# OS / editor
+.DS_Store
+*:Zone.Identifier
