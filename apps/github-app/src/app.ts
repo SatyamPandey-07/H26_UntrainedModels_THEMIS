@@ -18,7 +18,11 @@ export interface DispatchPayload {
 }
 
 type AnyContext = Context<
-  "issue_comment.created" | "issues.edited" | "installation.created" | "installation_repositories.added"
+  | "issue_comment.created"
+  | "issues.edited"
+  | "issues.labeled"
+  | "installation.created"
+  | "installation_repositories.added"
 >;
 
 /** Sends a repository_dispatch to the runner repo using the App's installation there. */
@@ -163,5 +167,39 @@ export default (app: Probot): void => {
         body: `Started ${room} of ${ticked.length} requested migrations; the open pull request limit is ${MAX_OPEN_PRS}.`,
       });
     }
+  });
+
+  // Adding the `themis` label to an issue whose title names a package (`/themis <pkg>` or a backticked name).
+  app.on("issues.labeled", async (context) => {
+    const { issue, label, repository, sender } = context.payload;
+    if (context.isBot || label?.name !== "themis" || isDashboard(issue.body)) return;
+    const owner = repository.owner.login;
+    const repo = repository.name;
+    if (!(await senderCanWrite(context, owner, repo, sender.login))) return;
+    const pkg = COMMAND_RE.exec(issue.title)?.[1] ?? /`([^`\s]+)`/.exec(issue.title)?.[1];
+    const limits = await openThemisPrCount(context, owner, repo, pkg);
+    if (limits.forPackage || limits.total >= MAX_OPEN_PRS) return;
+    await context.octokit.rest.issues.createComment({
+      owner,
+      repo,
+      issue_number: issue.number,
+      body: `Themis is starting a migration run for ${pkg ? `\`${pkg}\`` : "the recommended dependency"}.`,
+    });
+    await dispatchRun(app, {
+      repository: repository.full_name,
+      mode: "run",
+      package: pkg,
+      issue_number: String(issue.number),
+      trigger: "label",
+    });
+  });
+
+  // GitHub Marketplace plan events. Themis has a single free plan, so these are recorded, not billed.
+  app.on("marketplace_purchase", async (context) => {
+    const { action, marketplace_purchase: purchase } = context.payload;
+    app.log.info(
+      { action, account: purchase.account.login, plan: purchase.plan.name },
+      "marketplace purchase event",
+    );
   });
 };

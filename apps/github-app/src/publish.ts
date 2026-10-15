@@ -11,9 +11,16 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { Octokit } from "@octokit/rest";
-import { Capsule, Findings, capsuleRepoPath, sendAlert } from "@themis/core";
+import { Capsule, Findings, capsuleRepoPath, recommendDependency, sendAlert } from "@themis/core";
 import type { CheckRunOutput } from "@themis/core";
+import { readRepoConfig } from "./config.js";
 import { DASHBOARD_TITLE, isDashboard, renderDashboard } from "./dashboard.js";
+
+/** Writes a step output when running inside GitHub Actions. */
+function setOutput(name: string, value: string): void {
+  const file = process.env.GITHUB_OUTPUT;
+  if (file) writeFileSync(file, `${name}=${value}\n`, { flag: "a" });
+}
 
 interface CliResult {
   runId?: string;
@@ -166,10 +173,17 @@ async function main(): Promise<void> {
   }
 
   if (mode === "scan") {
+    const { config, warning } = await readRepoConfig(octokit, owner, repo);
+    const visible: Findings = {
+      ...(findings as Findings),
+      dependencies: (findings as Findings).dependencies.filter((d) => !config.ignore.includes(d.name)),
+    };
+    const recommended = recommendDependency(visible);
     const prs = await openThemisPrs(octokit, owner, repo);
     const dash = await tryDashboard(() =>
-      upsertDashboard(octokit, owner, repo, findings as Findings, prs, runUrl, result.recommended),
+      upsertDashboard(octokit, owner, repo, visible, prs, runUrl, recommended?.name),
     );
+    if (warning && dash) await comment(octokit, owner, repo, dash.number, warning);
     if (dash && issueNumber && issueNumber !== dash.number)
       await comment(
         octokit,
@@ -179,6 +193,26 @@ async function main(): Promise<void> {
         `Scan finished. Ranked dependencies are on the [Dependency Dashboard](${dash.url}).`,
       );
     console.log(dash ? `dashboard: ${dash.url}` : "scan finished without a dashboard");
+
+    // Automatic decision: migrate the top risky dependency, at most once per interval, within the PR limit.
+    const risky = recommended && (recommended.risk.vulnerabilities.length > 0 || recommended.risk.deprecated);
+    if (
+      config.autoMigrate &&
+      risky &&
+      !prs[recommended.name] &&
+      Object.keys(prs).length < config.maxOpenPrs
+    ) {
+      const since = Date.now() - config.autoMigrateIntervalDays * 86_400_000;
+      const recent = await octokit.paginate(octokit.pulls.list, { owner, repo, state: "all", per_page: 100 });
+      const autoRecently = recent.some(
+        (p) => p.head.ref.startsWith("themis/") && Date.parse(p.created_at) > since,
+      );
+      if (!autoRecently) {
+        setOutput("auto_package", recommended.name);
+        if (dash) setOutput("dashboard_issue", String(dash.number));
+        console.log(`auto-migrate: ${recommended.name}`);
+      }
+    }
     return;
   }
 

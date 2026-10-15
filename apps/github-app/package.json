@@ -11,6 +11,8 @@
   "dependencies": {
     "@octokit/rest": "22.0.1",
     "@themis/core": "workspace:*",
-    "probot": "14.3.2"
+    "probot": "14.3.2",
+    "yaml": "2.9.1",
+    "zod": "4.6.7"
   }
 }

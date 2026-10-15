@@ -1,7 +1,8 @@
 name: Themis runner
 
 # Runs the Themis pipeline against a repository where the Themis GitHub App is installed.
-# Started by the App's webhook server (repository_dispatch) or by hand (workflow_dispatch).
+# Started by the App's webhook server (repository_dispatch), by hand (workflow_dispatch), by the weekly schedule
+# (rescan), or by itself when a scan decides to auto-migrate the top risky dependency.
 on:
   workflow_dispatch:
     inputs:
@@ -23,6 +24,9 @@ on:
         default: ""
   repository_dispatch:
     types: [themis-run]
+  schedule:
+    # Weekly rescan of every repository that has a Themis Dependency Dashboard.
+    - cron: "17 6 * * 1"
 
 permissions:
   contents: read
@@ -34,6 +38,7 @@ concurrency:
 jobs:
   prepare:
     name: Prepare target (read-only)
+    if: ${{ github.event_name != 'schedule' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     outputs:
@@ -178,6 +183,9 @@ jobs:
     if: ${{ always() && needs.prepare.result == 'success' && needs.pipeline.result != 'cancelled' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    outputs:
+      auto_package: ${{ steps.publish.outputs.auto_package }}
+      dashboard_issue: ${{ steps.publish.outputs.dashboard_issue }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -214,6 +222,7 @@ jobs:
           permission-issues: write
 
       - name: Publish results
+        id: publish
         env:
           GITHUB_TOKEN: ${{ steps.token.outputs.token }}
           TARGET_REPO: ${{ needs.prepare.outputs.repository }}
@@ -229,3 +238,59 @@ jobs:
           git config --global user.name "themis[bot]"
           git config --global user.email "themis-bot@users.noreply.github.com"
           node apps/github-app/dist/publish.js
+
+  auto-migrate:
+    name: Queue automatic migration
+    needs: [prepare, publish]
+    if: ${{ needs.publish.outputs.auto_package != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Dispatch migration run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET: ${{ needs.prepare.outputs.repository }}
+          PACKAGE: ${{ needs.publish.outputs.auto_package }}
+          ISSUE: ${{ needs.publish.outputs.dashboard_issue }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/dispatches" \
+            -f event_type=themis-run \
+            -f "client_payload[repository]=$TARGET" \
+            -f "client_payload[mode]=run" \
+            -f "client_payload[package]=$PACKAGE" \
+            -f "client_payload[issue_number]=$ISSUE" \
+            -f "client_payload[trigger]=auto"
+
+  rescan:
+    name: Weekly rescan
+    if: ${{ github.event_name == 'schedule' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - name: Build
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm --filter @themis/core --filter @themis/github-app build
+
+      - name: Queue scans
+        env:
+          THEMIS_APP_CLIENT_ID: ${{ vars.THEMIS_APP_CLIENT_ID }}
+          THEMIS_APP_PRIVATE_KEY: ${{ secrets.THEMIS_APP_PRIVATE_KEY }}
+          GH_TOKEN: ${{ github.token }}
+          RUNNER_REPO: ${{ github.repository }}
+        run: node apps/github-app/dist/rescan.js
