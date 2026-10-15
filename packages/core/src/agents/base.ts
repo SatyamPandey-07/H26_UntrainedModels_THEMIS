@@ -119,20 +119,25 @@ export async function runAgent<T>(
   for (let step = 1; step <= maxSteps; step++) {
     const isLast = step === maxSteps;
     const response = await llm.chat({ messages, tools: chatTools, toolChoice: "required" });
+
+    if (response.toolCalls.length === 0) {
+      if (response.content) messages.push({ role: "assistant", content: response.content });
+      messages.push({
+        role: "user",
+        content: `You must respond with a tool call. Call ${submitName} with your final answer as JSON arguments${
+          isLast ? " now" : ", or call another tool first"
+        }. Do not write plain text.`,
+      });
+      save();
+      continue;
+    }
+
     messages.push({
       role: "assistant",
       content: response.content || null,
-      ...(response.toolCalls.length > 0 ? { tool_calls: response.toolCalls } : {}),
+      tool_calls: response.toolCalls,
     } as ChatMessage);
     save();
-
-    if (response.toolCalls.length === 0) {
-      messages.push({
-        role: "user",
-        content: `Call ${submitName} with your final answer${isLast ? " now" : ", or call another tool first"}.`,
-      });
-      continue;
-    }
 
     for (const call of response.toolCalls) {
       const name = call.function.name;
@@ -172,7 +177,19 @@ export async function runAgent<T>(
 
       const tool = byName.get(name);
       if (!tool) {
-        messages.push({ role: "tool", tool_call_id: call.id, content: `Error: unknown tool "${name}".` });
+        // A result submitted under the wrong tool name still counts if it matches the output schema.
+        const asResult = opts.output.safeParse(rawArgs);
+        if (asResult.success) {
+          messages.push({ role: "tool", tool_call_id: call.id, content: "Accepted." });
+          save();
+          logEvent(ctx, `${opts.agent}: ${opts.label} done in ${step} step(s)`);
+          return { output: asResult.data, steps: step, transcriptPath, model: llm.model, inputs };
+        }
+        messages.push({
+          role: "tool",
+          tool_call_id: call.id,
+          content: `Error: unknown tool "${name}". Available tools: ${[...byName.keys(), submitName].join(", ")}.`,
+        });
         continue;
       }
       const args = tool.parameters.safeParse(rawArgs);

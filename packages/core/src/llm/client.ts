@@ -37,16 +37,14 @@ export class GroqClient implements LlmClient {
   }
 
   async chat(request: ChatRequest): Promise<ChatResponse> {
-    const completion = await this.client.chat.completions.create({
-      model: this.model,
-      messages: request.messages,
-      ...(request.tools && request.tools.length > 0
-        ? { tools: request.tools, tool_choice: request.toolChoice ?? "auto", parallel_tool_calls: false }
-        : {}),
-      temperature: request.temperature ?? 0.2,
-      max_completion_tokens: request.maxTokens ?? 8192,
-      ...(this.model.startsWith("openai/gpt-oss") ? { reasoning_effort: "medium" as const } : {}),
-    });
+    let completion: Groq.Chat.Completions.ChatCompletion;
+    try {
+      completion = await this.create(request);
+    } catch (err) {
+      const recovered = recoverToolCall(err);
+      if (recovered) return recovered;
+      throw err;
+    }
     const choice = completion.choices[0];
     return {
       content: choice?.message.content ?? "",
@@ -57,5 +55,63 @@ export class GroqClient implements LlmClient {
         completionTokens: completion.usage?.completion_tokens ?? 0,
       },
     };
+  }
+
+  private create(request: ChatRequest) {
+    return this.client.chat.completions.create({
+      model: this.model,
+      messages: request.messages,
+      ...(request.tools && request.tools.length > 0
+        ? { tools: request.tools, tool_choice: request.toolChoice ?? "auto", parallel_tool_calls: false }
+        : {}),
+      temperature: request.temperature ?? 0.2,
+      max_completion_tokens: request.maxTokens ?? 8192,
+      ...(this.model.startsWith("openai/gpt-oss") ? { reasoning_effort: "medium" as const } : {}),
+      stream: false,
+    });
+  }
+}
+
+let recoveredSeq = 0;
+
+/**
+ * gpt-oss models occasionally emit a tool call under a channel name (e.g. "commentary") that is not a
+ * declared tool, and Groq rejects the request with `tool_use_failed`. The intended call is in
+ * `failed_generation`; return it so the agent loop can validate it like any other call. When the model wrote
+ * plain text instead of a required tool call (`output_parse_failed`), return an empty turn so the loop can nudge it.
+ */
+function recoverToolCall(err: unknown): ChatResponse | undefined {
+  if (!(err instanceof Groq.BadRequestError)) return undefined;
+  const body = (err.error as { error?: { code?: string; failed_generation?: string } } | undefined)?.error;
+  if (body?.code !== "tool_use_failed" && body?.code !== "output_parse_failed") return undefined;
+  const empty: ChatResponse = {
+    content: "",
+    toolCalls: [],
+    finishReason: "tool_use_failed",
+    usage: { promptTokens: 0, completionTokens: 0 },
+  };
+  if (body.code === "output_parse_failed") return { ...empty, finishReason: "output_parse_failed" };
+  try {
+    const parsed = JSON.parse(body.failed_generation ?? "") as { name?: string; arguments?: unknown };
+    if (!parsed.name) return empty;
+    recoveredSeq += 1;
+    return {
+      ...empty,
+      toolCalls: [
+        {
+          id: `recovered_${recoveredSeq}`,
+          type: "function",
+          function: {
+            name: parsed.name,
+            arguments:
+              typeof parsed.arguments === "string"
+                ? parsed.arguments
+                : JSON.stringify(parsed.arguments ?? {}),
+          },
+        },
+      ],
+    };
+  } catch {
+    return empty;
   }
 }

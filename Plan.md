@@ -53,7 +53,7 @@ apps/github-app/vercel.json  serverless deployment of the webhook server
 - [x] 4. Groq LLM client and agent loop
 - [x] 5. Analysis tools and wrappers
 - [x] 6. Argus — Scout
-- [ ] 7. Athena — Planner
+- [x] 7. Athena — Planner
 - [ ] 8. Docker sandbox
 - [ ] 9. Hephaestus — Migrator
 - [ ] 10. Minos — Verifier
@@ -227,7 +227,7 @@ the plugin in a scratch Claude Code session on a clone and run `/themis` (on the
 - [x] 4. **Fork + install (step 15):** fork the demo-target repo to your account, install the App on the fork only.
 - [x] 5. **Alerts (optional):** create a webhook receiver (e.g. a webhook.site URL) → `ALERT_WEBHOOK_URL`.
 - [x] 6. **Push access:** local `gh`/git switched to `ayushsshukla` (write access to this repo).
-- [ ] 7. **Runner secrets (this repo, maintainers only):** `GROQ_API_KEY`, `THEMIS_APP_ID`, `THEMIS_APP_PRIVATE_KEY`
+- [x] 7. **Runner secrets (this repo, maintainers only):** `GROQ_API_KEY`, `THEMIS_APP_ID`, `THEMIS_APP_PRIVATE_KEY`
    in Actions secrets of the runner repo. Owners never add secrets.
 - [ ] 8. **Deploy the webhook server:** Vercel project from `apps/github-app` with `APP_ID`, `PRIVATE_KEY`,
    `WEBHOOK_SECRET`, `RUNNER_REPO`; point the App's webhook URL at it. The App is also installed on the runner repo,
