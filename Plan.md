@@ -63,6 +63,7 @@ apps/github-app/vercel.json  serverless deployment of the webhook server
 - [ ] 14. Claude Code plugin and READMEs
 - [ ] 15. End-to-end verification — fork and run the app
 - [x] 16. Python ecosystem (pip + requirements.txt), additive; Node/npm behaviour unchanged (Docker, pip-audit and the full run first exercised on the runner)
+- [x] 17. Groq key pool with model fallback and token-aware prompt shaping (real Groq headers and `reasoning_effort: "none"` on the fallback first exercised on the runner)
 
 ## Tracking
 
@@ -240,6 +241,17 @@ so a repository with `package.json` runs exactly as before. Ecosystem choice: `p
 - **Out of scope:** Poetry, uv-managed, Pipenv and pyproject-only dependency declarations; mixed repositories run
   the primary ecosystem and report the other as a gap.
 
+### 17. Groq key pool, model fallback and prompt shaping (`packages/core/src/llm/pool.ts`, `agents/context.ts`)
+- **Keys and models:** `GROQ_API_KEY_1..N` (plus `GROQ_API_KEYS`, `GROQ_API_KEY`); every key tries `GROQ_MODEL`
+  (`openai/gpt-oss-120b`) then `GROQ_FALLBACK_MODEL` (`qwen/qwen3.8-27b`; `qwen/qwen3-32b` was withdrawn 2026-07-17).
+  429 moves to the next slot at once; daily limits exclude a slot for the run; 401/403 drop a key; 404 drops a model;
+  413 re-shapes the prompt for the limit Groq reports. Limits are per Groq organization, not per key.
+- **Prompt shaping:** the full history is kept, each request sends a view sized to the model that will answer:
+  compact JSON and grouped call sites, executed tool arguments and old results stubbed, blocks trimmed by priority,
+  shared skills digested, oldest exchanges collapsed. Skills and system prompts are not edited. The model that
+  actually answered is what AI-RECOMMENDED claims and commit trailers name.
+- **Runner:** secrets `GROQ_API_KEY_1..5` are passed to every agent job; `GROQ_FALLBACK_MODEL` is a repository variable.
+
 ## Manual steps for the user (I'll prompt at the right step)
 
 - [x] 1. **Docker socket:** no longer needed; sandboxes run on Actions runners.
@@ -262,6 +274,10 @@ so a repository with `package.json` runs exactly as before. Ecosystem choice: `p
    Marketplace*; free plan; descriptions, logo, feature card, screenshots from the WorkSphere demo; privacy policy
    (`PRIVACY.md`) and support (Issues) links; Marketplace webhook = the server URL; accept the developer agreement
    and *Submit for review*. Until approval, owners install from `https://github.com/apps/<app-slug>`.
+
+- [ ] 12. **Groq keys (runner repo, admin):** add `GROQ_API_KEY_1` … `GROQ_API_KEY_5` as Actions secrets
+   (`gh secret set GROQ_API_KEY_1 --repo <runner-repo>`), ideally from different Groq organizations because limits are
+   per organization. Optional repository variable `GROQ_FALLBACK_MODEL` (default `qwen/qwen3.8-27b`).
 
 ## Verification
 
