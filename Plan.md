@@ -197,6 +197,9 @@ repo. Stateless; state lives in the dashboard issue and run artifacts.
 **App permissions** (target repos): Contents, Pull requests, Checks, Issues = Read and write; Metadata = Read.
 No Actions, Workflows, Secrets or Administration access is requested from owners.
 **Events:** Installation, Installation repositories, Issues, Issue comment. Documented in `app.yml`.
+**Marketplace readiness:** the server handles `marketplace_purchase` events (free plan: log the purchase,
+cancellation and plan change; on cancellation stop runs for that account). The repo ships `PRIVACY.md` (what is
+read, what is stored, Groq as subprocessor, retention of run artifacts) and support via GitHub Issues.
 
 ### 14. Claude Code plugin (zero config) and READMEs (`plugin/`, `.claude-plugin/marketplace.json`, `README.md`s)
 Install: `/plugin marketplace add SatyamPandey-07/H26_UntrainedModels_THEMIS` → `/plugin install themis@themis`.
@@ -234,6 +237,12 @@ the plugin in a scratch Claude Code session on a clone and run `/themis` (on the
    so the server dispatches runs with an installation token (`repository_dispatch` needs Contents write only).
 - [ ] 9. **Install the App on the WorkSphere fork** (the only owner-side step). Fork Actions stay disabled; nothing
    runs on the fork's runners.
+- [ ] 10. **App credentials:** generate the private key and a webhook secret; store them only in the runner repo's
+   Actions secrets and the Vercel project (plus a local, gitignored copy for development).
+- [ ] 11. **GitHub Marketplace listing (after step 15 passes):** Developer settings → the App → *List in
+   Marketplace*; free plan; descriptions, logo, feature card, screenshots from the WorkSphere demo; privacy policy
+   (`PRIVACY.md`) and support (Issues) links; Marketplace webhook = the server URL; accept the developer agreement
+   and *Submit for review*. Until approval, owners install from `https://github.com/apps/<app-slug>`.
 
 ## Verification
 
