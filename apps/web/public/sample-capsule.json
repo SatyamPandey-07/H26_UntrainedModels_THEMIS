@@ -1,0 +1,473 @@
+{
+  "schemaVersion": "1",
+  "runId": "20261015-101601-svix-7e9e",
+  "generatedAt": "2026-10-15T10:24:32.028Z",
+  "repository": "ayushsshukla/WorkSphere",
+  "dependency": {
+    "name": "svix",
+    "from": "2.0.0",
+    "to": "svix@2.8.0",
+    "strategy": "upgrade"
+  },
+  "verdict": "Migrated, gaps remain",
+  "confidence": "high",
+  "branch": "themis/svix-20261015",
+  "filesChanged": ["package-lock.json", "package.json"],
+  "summary": {
+    "callSites": 1,
+    "callSitesCovered": 0,
+    "newTestFailures": 0,
+    "lintDelta": 0,
+    "newSecurityFindings": 0,
+    "probeMismatches": 0
+  },
+  "claims": [
+    {
+      "id": "argus-001",
+      "tag": "OBSERVED",
+      "agent": "argus",
+      "section": "dependency-details",
+      "text": "Language: typescript",
+      "evidence": {
+        "kind": "source",
+        "file": "tsconfig.json"
+      }
+    },
+    {
+      "id": "argus-002",
+      "tag": "OBSERVED",
+      "agent": "argus",
+      "section": "dependency-details",
+      "text": "Package manager: npm",
+      "evidence": {
+        "kind": "source",
+        "file": "package-lock.json"
+      }
+    },
+    {
+      "id": "argus-003",
+      "tag": "OBSERVED",
+      "agent": "argus",
+      "section": "dependency-details",
+      "text": "Node version: 20",
+      "evidence": {
+        "kind": "source",
+        "file": ".nvmrc"
+      }
+    },
+    {
+      "id": "argus-004",
+      "tag": "OBSERVED",
+      "agent": "argus",
+      "section": "dependency-details",
+      "text": "Test command: `npm test` (jest)",
+      "evidence": {
+        "kind": "source",
+        "file": "package.json"
+      }
+    },
+    {
+      "id": "argus-005",
+      "tag": "OBSERVED",
+      "agent": "argus",
+      "section": "dependency-details",
+      "text": "Linters: eslint",
+      "evidence": {
+        "kind": "source",
+        "file": "eslint.config.mjs"
+      }
+    },
+    {
+      "id": "argus-006",
+      "tag": "OBSERVED",
+      "agent": "argus",
+      "section": "dependency-details",
+      "text": "94 direct dependencies (35 dev); tree read from package-lock.json",
+      "evidence": {
+        "kind": "source",
+        "file": "package-lock.json"
+      }
+    },
+    {
+      "id": "argus-007",
+      "tag": "EXECUTED",
+      "agent": "argus",
+      "section": "risk-indicators",
+      "text": "npm-audit reported 98 vulnerability record(s)",
+      "evidence": {
+        "kind": "command",
+        "command": "npm audit --json --package-lock-only",
+        "exitCode": 1,
+        "logPath": "logs/002-npm-audit.log"
+      }
+    },
+    {
+      "id": "argus-008",
+      "tag": "EXECUTED",
+      "agent": "argus",
+      "section": "risk-indicators",
+      "text": "osv-scanner reported 102 vulnerability record(s)",
+      "evidence": {
+        "kind": "command",
+        "command": "osv-scanner scan source --format json --lockfile package-lock.json",
+        "exitCode": 1,
+        "logPath": "logs/003-osv-scanner.log"
+      }
+    },
+    {
+      "id": "argus-009",
+      "tag": "EXECUTED",
+      "agent": "argus",
+      "section": "risk-indicators",
+      "text": "trivy reported 81 vulnerability record(s)",
+      "evidence": {
+        "kind": "command",
+        "command": "trivy fs --scanners vuln --format json --quiet --skip-dirs node_modules .",
+        "exitCode": 0,
+        "logPath": "logs/004-trivy-fs.log"
+      }
+    },
+    {
+      "id": "argus-010",
+      "tag": "OBSERVED",
+      "agent": "argus",
+      "section": "risk-indicators",
+      "text": "`prisma` (score 70): 16 known vulnerabilit(y/ies); installed 7.10.0, latest 8.0.0-rc.23; latest release 0 days ago; 138 transitive packages",
+      "evidence": {
+        "kind": "source",
+        "url": "https://registry.npmjs.org/prisma"
+      }
+    },
+    {
+      "id": "argus-011",
+      "tag": "OBSERVED",
+      "agent": "argus",
+      "section": "risk-indicators",
+      "text": "`partykit` (score 69.6): 49 known vulnerabilit(y/ies); installed 0.0.115, latest 0.0.115; latest release 511 days ago; 96 transitive packages",
+      "evidence": {
+        "kind": "source",
+        "url": "https://registry.npmjs.org/partykit"
+      }
+    },
+    {
+      "id": "argus-012",
+      "tag": "OBSERVED",
+      "agent": "argus",
+      "section": "risk-indicators",
+      "text": "`@solana/web3.js` (score 60.7): 8 known vulnerabilit(y/ies); installed 1.99.0, latest 1.99.0; latest release 36 days ago; 57 transitive packages",
+      "evidence": {
+        "kind": "source",
+        "url": "https://registry.npmjs.org/@solana%2Fweb3.js"
+      }
+    },
+    {
+      "id": "argus-013",
+      "tag": "OBSERVED",
+      "agent": "argus",
+      "section": "risk-indicators",
+      "text": "`ts-jest` (score 60): 18 known vulnerabilit(y/ies); installed 29.4.12, latest 29.4.15; latest release 0 days ago; 362 transitive packages",
+      "evidence": {
+        "kind": "source",
+        "url": "https://registry.npmjs.org/ts-jest"
+      }
+    },
+    {
+      "id": "argus-014",
+      "tag": "OBSERVED",
+      "agent": "argus",
+      "section": "risk-indicators",
+      "text": "`@prisma/client` (score 60): 16 known vulnerabilit(y/ies); installed 7.10.0, latest 7.10.0; latest release 50 days ago; 140 transitive packages",
+      "evidence": {
+        "kind": "source",
+        "url": "https://registry.npmjs.org/@prisma%2Fclient"
+      }
+    },
+    {
+      "id": "argus-015",
+      "tag": "OBSERVED",
+      "agent": "argus",
+      "section": "risk-indicators",
+      "text": "`eslint-config-next` (score 60): 15 known vulnerabilit(y/ies); installed 16.3.5, latest 16.4.1; latest release 0 days ago; 346 transitive packages",
+      "evidence": {
+        "kind": "source",
+        "url": "https://registry.npmjs.org/eslint-config-next"
+      }
+    },
+    {
+      "id": "argus-016",
+      "tag": "OBSERVED",
+      "agent": "argus",
+      "section": "risk-indicators",
+      "text": "`jest` (score 60): 15 known vulnerabilit(y/ies); installed 30.5.2, latest 30.5.2; latest release 26 days ago; 349 transitive packages",
+      "evidence": {
+        "kind": "source",
+        "url": "https://registry.npmjs.org/jest"
+      }
+    },
+    {
+      "id": "argus-017",
+      "tag": "OBSERVED",
+      "agent": "argus",
+      "section": "risk-indicators",
+      "text": "`snarkjs` (score 58.4): 12 known vulnerabilit(y/ies); installed 0.7.6, latest 0.7.6; latest release 275 days ago; 34 transitive packages",
+      "evidence": {
+        "kind": "source",
+        "url": "https://registry.npmjs.org/snarkjs"
+      }
+    },
+    {
+      "id": "argus-018",
+      "tag": "AI-RECOMMENDED",
+      "agent": "argus",
+      "section": "ai-analysis",
+      "text": "`prisma`: The Prisma dependency has a high overall risk score of 70, driven by multiple high‑severity vulnerabilities in transitive packages such as deepmerge-ts and fast‑uri, all of which have available fixes in earlier versions of those packages. The presence of these unresolved issues in the current dependency tree makes Prisma a priority for migration.",
+      "evidence": {
+        "kind": "model",
+        "model": "openai/gpt-oss-20b",
+        "inputs": ["ranked-dependencies.json"]
+      }
+    },
+    {
+      "id": "athena-001",
+      "tag": "EXECUTED",
+      "agent": "athena",
+      "section": "usage-locations",
+      "text": "Opengrep found 2 usage site(s) of `svix`",
+      "evidence": {
+        "kind": "command",
+        "command": "opengrep scan --config /home/runner/work/H26_UntrainedModels_THEMIS/H26_UntrainedModels_THEMIS/target/.themis/runs/20261015-101601-svix-7e9e/rules/svix-usage.yaml --json --quiet --exclude node_modules --exclude .themis .",
+        "exitCode": 0,
+        "logPath": "logs/1001-opengrep-usage.log"
+      }
+    },
+    {
+      "id": "athena-002",
+      "tag": "OBSERVED",
+      "agent": "athena",
+      "section": "usage-locations",
+      "text": "src/lib/notifications/channels/webhookChannel.ts:2 `import` (themis-svix-import)",
+      "evidence": {
+        "kind": "source",
+        "file": "src/lib/notifications/channels/webhookChannel.ts",
+        "line": 2
+      }
+    },
+    {
+      "id": "athena-003",
+      "tag": "OBSERVED",
+      "agent": "athena",
+      "section": "usage-locations",
+      "text": "src/lib/notifications/channels/webhookChannel.ts:40 `Webhook` (themis-svix-usage-new)",
+      "evidence": {
+        "kind": "source",
+        "file": "src/lib/notifications/channels/webhookChannel.ts",
+        "line": 40
+      }
+    },
+    {
+      "id": "athena-004",
+      "tag": "OBSERVED",
+      "agent": "athena",
+      "section": "maintenance-problem",
+      "text": "`svix` ranks with risk score 25.3 and is deprecated",
+      "evidence": {
+        "kind": "source",
+        "url": "https://registry.npmjs.org/svix"
+      }
+    },
+    {
+      "id": "athena-005",
+      "tag": "AI-RECOMMENDED",
+      "agent": "athena",
+      "section": "ai-analysis",
+      "text": "Upgrade `svix` with `svix@2.8.0` (confidence: high). The repository imports svix and constructs a Webhook with a secret. The latest 2.8.0 release is compatible with the existing constructor signature. No API changes affect the usage sites. No fix rules are required. The deprecation message refers to the verify function signature, which is not used in the current code. Therefore the migration is straightforward.",
+      "evidence": {
+        "kind": "model",
+        "model": "openai/gpt-oss-20b",
+        "inputs": ["dependency.json", "usage-map.json", "toolchain.json"]
+      }
+    },
+    {
+      "id": "athena-006",
+      "tag": "AI-RECOMMENDED",
+      "agent": "athena",
+      "section": "proposed-changes",
+      "text": "dependency: upgrade svix to 2.8.0 (package.json, package-lock.json)",
+      "evidence": {
+        "kind": "model",
+        "model": "openai/gpt-oss-20b",
+        "inputs": ["dependency.json", "usage-map.json", "toolchain.json"]
+      }
+    },
+    {
+      "id": "athena-007",
+      "tag": "AI-RECOMMENDED",
+      "agent": "athena",
+      "section": "proposed-changes",
+      "text": "tests: characterization tests for svix call sites (src/lib/notifications/channels/webhookChannel.ts)",
+      "evidence": {
+        "kind": "model",
+        "model": "openai/gpt-oss-20b",
+        "inputs": ["dependency.json", "usage-map.json", "toolchain.json"]
+      }
+    },
+    {
+      "id": "athena-008",
+      "tag": "AI-RECOMMENDED",
+      "agent": "athena",
+      "section": "suggested-tests",
+      "text": "src/lib/notifications/channels/webhookChannel.ts:40",
+      "evidence": {
+        "kind": "model",
+        "model": "openai/gpt-oss-20b",
+        "inputs": ["dependency.json", "usage-map.json", "toolchain.json"]
+      }
+    },
+    {
+      "id": "hephaestus-001",
+      "tag": "EXECUTED",
+      "agent": "hephaestus",
+      "section": "proposed-changes",
+      "text": "Created branch `themis/svix-20261015` from 69d7ada in a separate worktree",
+      "evidence": {
+        "kind": "command",
+        "command": "git worktree add -B themis/svix-20261015 /home/runner/work/H26_UntrainedModels_THEMIS/H26_UntrainedModels_THEMIS/worktrees/20261015-101601-svix-7e9e 69d7ada03e9b2e8162a34afb221ca460704dd3bb",
+        "exitCode": 0,
+        "logPath": "logs/1001-git-worktree-add.log"
+      }
+    },
+    {
+      "id": "hephaestus-002",
+      "tag": "EXECUTED",
+      "agent": "hephaestus",
+      "section": "proposed-changes",
+      "text": "Added `svix@2.8.0` to the manifest and lockfile",
+      "evidence": {
+        "kind": "command",
+        "command": "npm install --package-lock-only --ignore-scripts --no-audit --no-fund svix@2.8.0",
+        "exitCode": 0,
+        "logPath": "logs/1002-pm-add.log"
+      }
+    },
+    {
+      "id": "hephaestus-003",
+      "tag": "AI-RECOMMENDED",
+      "agent": "hephaestus",
+      "section": "suggested-tests",
+      "text": "Generated 1 characterization test file(s): src/__tests__/themis-svix.characterization.test.ts. ",
+      "evidence": {
+        "kind": "model",
+        "model": "openai/gpt-oss-20b",
+        "inputs": [
+          "call-sites.json",
+          "suggested-tests.md",
+          "toolchain.json",
+          "existing-test-files.txt",
+          "test-shapes.md"
+        ]
+      }
+    },
+    {
+      "id": "hephaestus-004",
+      "tag": "UNVERIFIED",
+      "agent": "hephaestus",
+      "section": "gaps",
+      "text": "Characterization tests could not be validated because the baseline install failed",
+      "evidence": {
+        "kind": "none",
+        "reason": "see logs/1006-docker-build-baseline.log"
+      }
+    },
+    {
+      "id": "minos-101",
+      "tag": "EXECUTED",
+      "agent": "minos",
+      "section": "executed-results",
+      "text": "Baseline install (main @ 69d7ada) exited 1",
+      "evidence": {
+        "kind": "command",
+        "command": "docker build --file /home/runner/work/H26_UntrainedModels_THEMIS/H26_UntrainedModels_THEMIS/docker/sandbox.Dockerfile --build-arg NODE_VERSION=20 --tag themis-20261015-101601-svix-7e9e-baseline:69d7ada03e9b --progress plain /tmp/themis-export/20261015-101601-svix-7e9e/baseline-69d7ada03e9b",
+        "exitCode": 1,
+        "logPath": "logs/3002-docker-build-baseline.log"
+      }
+    },
+    {
+      "id": "minos-201",
+      "tag": "EXECUTED",
+      "agent": "minos",
+      "section": "executed-results",
+      "text": "Candidate install (themis/svix-20261015 @ 1157b8d) exited 1",
+      "evidence": {
+        "kind": "command",
+        "command": "docker build --file /home/runner/work/H26_UntrainedModels_THEMIS/H26_UntrainedModels_THEMIS/docker/sandbox.Dockerfile --build-arg NODE_VERSION=20 --tag themis-20261015-101601-svix-7e9e-candidate:1157b8d2c151 --progress plain /tmp/themis-export/20261015-101601-svix-7e9e/candidate-1157b8d2c151",
+        "exitCode": 1,
+        "logPath": "logs/6002-docker-build-candidate.log"
+      }
+    },
+    {
+      "id": "minos-301",
+      "tag": "UNVERIFIED",
+      "agent": "minos",
+      "section": "unresolved",
+      "text": "Tests were not run on both sides because an install failed.",
+      "evidence": {
+        "kind": "none",
+        "reason": "baseline or candidate install failed"
+      }
+    },
+    {
+      "id": "minos-302",
+      "tag": "EXECUTED",
+      "agent": "minos",
+      "section": "executed-results",
+      "text": "Security rescan: baseline 161, candidate 161 finding(s); 0 resolved, 0 new",
+      "evidence": {
+        "kind": "command",
+        "command": "security rescan (npm audit / OSV-Scanner / Trivy or pip-audit)",
+        "exitCode": 1,
+        "logPath": "logs/6003-npm-audit.log"
+      }
+    },
+    {
+      "id": "minos-303",
+      "tag": "UNVERIFIED",
+      "agent": "minos",
+      "section": "gaps",
+      "text": "Black-box probes were not run (no start command and port detected, or no Docker sandbox).",
+      "evidence": {
+        "kind": "none",
+        "reason": "probes skipped"
+      }
+    },
+    {
+      "id": "minos-304",
+      "tag": "UNVERIFIED",
+      "agent": "minos",
+      "section": "executed-results",
+      "text": "Call-site coverage: 0 of 1 affected call sites exercised by passing characterization tests",
+      "evidence": {
+        "kind": "none",
+        "reason": "no tests ran on the candidate"
+      }
+    },
+    {
+      "id": "minos-305",
+      "tag": "UNVERIFIED",
+      "agent": "minos",
+      "section": "gaps",
+      "text": "Call site not covered by a passing test: src/lib/notifications/channels/webhookChannel.ts:40 Webhook",
+      "evidence": {
+        "kind": "none",
+        "reason": "no characterization test names this site"
+      }
+    }
+  ],
+  "downgraded": [],
+  "toolVersions": {
+    "npm": "10.9.9",
+    "osv-scanner": "osv-scanner version: 2.7.0",
+    "trivy": "Version: 0.76.0",
+    "opengrep": "1.30.2",
+    "docker": "28.0.4"
+  }
+}

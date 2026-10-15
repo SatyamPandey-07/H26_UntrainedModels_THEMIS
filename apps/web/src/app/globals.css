@@ -1,0 +1,189 @@
+@import "tailwindcss";
+
+/* Theme follows the system unless the visitor picks one; the toggle sets data-theme on <html>. */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+:root {
+  --bg: #f7f6fd;
+  --surface: #ffffff;
+  --surface-2: #efecfb;
+  --ink: #1b1640;
+  --ink-muted: #5f5b85;
+  --primary: #3d1f99;
+  --primary-strong: #2a136e;
+  --primary-soft: #e9e3fd;
+  --accent: #d7f25c;
+  --accent-ink: #263000;
+  --border: #e4e1f5;
+  --focus: #7c5cfa;
+  --shadow: 0 12px 40px -12px rgb(61 31 153 / 0.18);
+
+  --tag-observed: #0b6bcb;
+  --tag-observed-bg: #e3f1fd;
+  --tag-executed: #1e7a3c;
+  --tag-executed-bg: #e2f6e8;
+  --tag-ai: #5b2bc4;
+  --tag-ai-bg: #eee8fd;
+  --tag-unverified: #8a5300;
+  --tag-unverified-bg: #fdf1dc;
+  --danger: #b42318;
+  --danger-bg: #fdecea;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e0b1f;
+    --surface: #17132e;
+    --surface-2: #211c40;
+    --ink: #ecebfb;
+    --ink-muted: #aaa6cb;
+    --primary: #9b86f5;
+    --primary-strong: #b3a3f8;
+    --primary-soft: #2a2350;
+    --accent: #d7f25c;
+    --accent-ink: #1d2400;
+    --border: #2c2650;
+    --focus: #a898f7;
+    --shadow: 0 12px 40px -12px rgb(0 0 0 / 0.55);
+    --tag-observed: #7cc0ff;
+    --tag-observed-bg: #12304d;
+    --tag-executed: #7fdc9b;
+    --tag-executed-bg: #14361f;
+    --tag-ai: #c4b2ff;
+    --tag-ai-bg: #2c1f5c;
+    --tag-unverified: #f5c26b;
+    --tag-unverified-bg: #3d2a08;
+    --danger: #ff8a80;
+    --danger-bg: #3d1210;
+  }
+}
+
+[data-theme="dark"] {
+  --bg: #0e0b1f;
+  --surface: #17132e;
+  --surface-2: #211c40;
+  --ink: #ecebfb;
+  --ink-muted: #aaa6cb;
+  --primary: #9b86f5;
+  --primary-strong: #b3a3f8;
+  --primary-soft: #2a2350;
+  --accent: #d7f25c;
+  --accent-ink: #1d2400;
+  --border: #2c2650;
+  --focus: #a898f7;
+  --shadow: 0 12px 40px -12px rgb(0 0 0 / 0.55);
+  --tag-observed: #7cc0ff;
+  --tag-observed-bg: #12304d;
+  --tag-executed: #7fdc9b;
+  --tag-executed-bg: #14361f;
+  --tag-ai: #c4b2ff;
+  --tag-ai-bg: #2c1f5c;
+  --tag-unverified: #f5c26b;
+  --tag-unverified-bg: #3d2a08;
+  --danger: #ff8a80;
+  --danger-bg: #3d1210;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-ink: var(--ink);
+  --color-ink-muted: var(--ink-muted);
+  --color-primary: var(--primary);
+  --color-primary-strong: var(--primary-strong);
+  --color-primary-soft: var(--primary-soft);
+  --color-accent: var(--accent);
+  --color-accent-ink: var(--accent-ink);
+  --color-border: var(--border);
+  --color-danger: var(--danger);
+  --color-danger-bg: var(--danger-bg);
+  --font-sans: var(--font-jakarta), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains), ui-monospace, monospace;
+  --radius-card: 20px;
+  --shadow-soft: var(--shadow);
+}
+
+html {
+  background: var(--bg);
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  min-height: 100dvh;
+  font-family: var(--font-sans);
+}
+
+:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+::selection {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+/* Soft lavender wash behind marketing pages, fixed so it never repaints while scrolling. */
+.page-wash::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(60% 50% at 85% 0%, rgb(155 134 245 / 0.18), transparent 70%),
+    radial-gradient(40% 40% at 0% 30%, rgb(215 242 92 / 0.12), transparent 70%);
+}
+
+/* driver.js popover restyled so the guided tour speaks with Tiko's voice. */
+.driver-popover.themis-tour {
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  box-shadow: var(--shadow);
+  padding: 18px 20px 16px 20px;
+  max-width: 340px;
+  font-family: var(--font-sans);
+}
+.driver-popover.themis-tour .driver-popover-title {
+  font-size: 15px;
+  font-weight: 700;
+}
+.driver-popover.themis-tour .driver-popover-description {
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--ink-muted);
+}
+.driver-popover.themis-tour .driver-popover-arrow {
+  border-color: var(--surface);
+}
+.driver-popover.themis-tour button {
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 13px;
+  padding: 6px 14px;
+  text-shadow: none;
+}
+.driver-popover.themis-tour .driver-popover-next-btn {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+}
+[data-theme="dark"] .driver-popover.themis-tour .driver-popover-next-btn {
+  color: #120c2b;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
