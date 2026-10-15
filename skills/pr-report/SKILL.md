@@ -12,13 +12,19 @@ Deterministic, like `capsule-write`. The PR body is rendered only from `capsule.
 
 ## Layout
 
-1. Verdict line with the stated confidence.
-2. Summary table: dependency, from, to, files changed, call sites covered, risk score.
-3. Provenance legend with the four tags.
-4. Collapsible `<details>` sections: usage map, Opengrep rules used, diff rationale, baseline versus
-   branch results, lint and security delta, black-box probes.
-5. Gaps and unresolved concerns, always present (write "None recorded." when empty).
-6. Link to the full capsule committed under `.themis/`.
+Title: the dependency commit subject, for example `build(deps): upgrade svix from 2.0.0 to 2.8.0`.
+
+1. Heading with the verdict, and a one-paragraph provenance legend.
+2. Key facts table: change, verdict, stated confidence, call sites covered, files changed, run link.
+3. **Why `<dependency>`**: the risk score broken into its signals with points, the blast radius (files and call
+   sites), and whether Themis selected it (most risk per affected file) or it was requested.
+4. **What changed**: one row per commit with the agent that made it.
+5. **Verification**: default branch versus this branch for install, tests, lint and security, then new
+   failures, coverage and any veto.
+6. **Gaps and unresolved concerns**, always present (write "None recorded." when empty).
+7. Collapsible `<details>`: usage map, plan rationale and behavioural differences, Opengrep rules, lint and
+   security delta, black-box probes, and the full Dependency Exit Capsule (trimmed first if the body would
+   exceed GitHub's 65,536-character limit; the full capsule is always committed under `.themis/`).
 
 Template: [assets/pr-body.md](assets/pr-body.md).
 

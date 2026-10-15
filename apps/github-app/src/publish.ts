@@ -11,10 +11,19 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { Octokit } from "@octokit/rest";
-import { Capsule, Findings, capsuleRepoPath, recommendDependency, sendAlert } from "@themis/core";
+import {
+  Capsule,
+  Findings,
+  MigrationPlan,
+  capsuleCommitMessage,
+  capsuleRepoPath,
+  pullRequestTitle,
+  recommendDependency,
+  sendAlert,
+} from "@themis/core";
 import type { CheckRunOutput } from "@themis/core";
 import { readRepoConfig } from "./config.js";
-import { DASHBOARD_TITLE, isDashboard, renderDashboard } from "./dashboard.js";
+import { DASHBOARD_TITLE, dependencySlug, isDashboard, renderDashboard } from "./dashboard.js";
 
 /** Writes a step output when running inside GitHub Actions. */
 function setOutput(name: string, value: string): void {
@@ -126,11 +135,11 @@ async function openThemisPrs(
 ): Promise<Record<string, { number: number; url: string }>> {
   const prs = await octokit.paginate(octokit.pulls.list, { owner, repo, state: "open", per_page: 100 });
   const out: Record<string, { number: number; url: string }> = {};
+  // Keyed by the dependency slug in the branch name (themis/<slug>-<YYYYMMDD>).
   for (const pr of prs) {
-    const m = /^themis\/(.+)-\d{8}$/.exec(pr.head.ref);
-    const dep =
-      pr.labels.some((l) => l.name === "themis") && m ? (/`([^`]+)`/.exec(pr.title)?.[1] ?? m[1]) : undefined;
-    if (dep) out[dep] = { number: pr.number, url: pr.html_url };
+    const slug = /^themis\/(.+)-\d{8}$/.exec(pr.head.ref)?.[1];
+    if (slug && pr.labels.some((l) => l.name === "themis"))
+      out[slug] = { number: pr.number, url: pr.html_url };
   }
   return out;
 }
@@ -200,7 +209,7 @@ async function main(): Promise<void> {
     if (
       config.autoMigrate &&
       risky &&
-      !prs[recommended.name] &&
+      !prs[dependencySlug(recommended.name)] &&
       Object.keys(prs).length < config.maxOpenPrs
     ) {
       const since = Date.now() - config.autoMigrateIntervalDays * 86_400_000;
@@ -264,13 +273,15 @@ async function main(): Promise<void> {
     "commit",
     "--no-verify",
     "-m",
-    `themis(capsule): Dependency Exit Capsule for ${dep}`,
+    capsuleCommitMessage(dep, capsule.verdict, capsule.runId),
   ]);
   git(dir, token, ["push", "--force", "origin", `refs/heads/${capsule.branch}:refs/heads/${capsule.branch}`]);
   const headSha = git(dir, token, ["rev-parse", "HEAD"]);
 
   // Draft PR (reuse an open one for the same branch).
-  const title = `Themis: ${capsule.dependency.strategy === "replace" ? "replace" : "upgrade"} \`${dep}\` → ${capsule.dependency.to ?? "?"} (${capsule.verdict})`;
+  const planRaw = readJsonFile<unknown>(join(runDir, "plan.json"));
+  const plan = planRaw ? MigrationPlan.parse(planRaw) : undefined;
+  const title = plan ? pullRequestTitle(plan) : `build(deps): migrate ${dep}`;
   const existing = (
     await octokit.pulls.list({ owner, repo, state: "open", head: `${owner}:${capsule.branch}` })
   ).data[0];

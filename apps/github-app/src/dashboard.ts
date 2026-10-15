@@ -3,8 +3,16 @@ import type { DependencyFinding, Findings } from "@themis/core";
 export const DASHBOARD_MARKER = "<!-- themis:dashboard -->";
 export const DASHBOARD_TITLE = "Themis Dependency Dashboard";
 
+/** Same rule as the engine's branch names: `themis/<slug>-<YYYYMMDD>`. */
+export function dependencySlug(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
 export interface DashboardLinks {
-  /** Open Themis PRs keyed by dependency name. */
+  /** Open Themis PRs keyed by dependency slug (from the branch name). */
   openPrs?: Record<string, { number: number; url: string }>;
   runUrl?: string;
   recommended?: string;
@@ -34,7 +42,7 @@ function signals(d: DependencyFinding): string {
 export function renderDashboard(findings: Findings, links: DashboardLinks = {}, limit = 25): string {
   const deps = findings.dependencies.slice(0, limit);
   const rows = deps.map((d) => {
-    const pr = links.openPrs?.[d.name];
+    const pr = links.openPrs?.[dependencySlug(d.name)];
     const box = pr ? `- [x] Migrate \`${d.name}\` (draft PR #${pr.number})` : `- [ ] Migrate \`${d.name}\``;
     return `${box} · score ${d.score} · ${d.currentVersion}${d.dev ? " (dev)" : ""} · ${signals(d)}`;
   });

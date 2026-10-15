@@ -51,26 +51,9 @@ export interface RunOutcome {
   error?: string;
 }
 
-/**
- * The dependency Themis migrates when none is named: the highest-ranked runtime dependency with a known
- * vulnerability or deprecation, then the highest-ranked runtime dependency, then anything.
- */
-export function recommendDependency(findings: Findings): DependencyFinding | undefined {
-  const deps = findings.dependencies;
-  const risky = (d: DependencyFinding) => d.risk.vulnerabilities.length > 0 || d.risk.deprecated;
-  // Prefer risk that is realistic to migrate: the score is discounted by the number of importing files, and a
-  // dependency no source file imports (a CLI, a type package) has nothing to migrate in code.
-  const priority = (d: DependencyFinding) => d.score / (1 + Math.log2(1 + (d.importingFiles ?? 1)));
-  const migratable = (d: DependencyFinding) => d.importingFiles === undefined || d.importingFiles > 0;
-  const best = (pool: DependencyFinding[]) =>
-    [...pool].sort((a, b) => priority(b) - priority(a) || b.score - a.score)[0];
-  return (
-    best(deps.filter((d) => !d.dev && risky(d) && migratable(d))) ??
-    best(deps.filter((d) => risky(d) && migratable(d))) ??
-    deps.find((d) => !d.dev && migratable(d)) ??
-    deps[0]
-  );
-}
+import { recommendDependency } from "./recommend.js";
+
+export { recommendDependency };
 
 async function stage<T>(ctx: RunContext, name: StageName, output: string, fn: () => Promise<T>): Promise<T> {
   setStage(ctx, name, "running");

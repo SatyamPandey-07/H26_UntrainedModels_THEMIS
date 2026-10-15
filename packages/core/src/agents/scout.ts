@@ -30,22 +30,61 @@ const BLAST_RADIUS_TOP = 25;
 
 const SEVERITY_POINTS: Record<string, number> = { critical: 30, high: 20, moderate: 10, low: 4, unknown: 6 };
 
+export interface RiskComponent {
+  signal: string;
+  value: string;
+  points: number;
+}
+
+/** Each part of the risk score with the signal behind it (skills/dependency-risk-rank/references/scoring.md). */
+export function riskBreakdown(risk: RiskIndicators, installed?: string): RiskComponent[] {
+  const bySeverity = new Map<string, number>();
+  for (const v of risk.vulnerabilities) bySeverity.set(v.severity, (bySeverity.get(v.severity) ?? 0) + 1);
+  const severities = [...bySeverity].map(([s, n]) => `${n} ${s}`).join(", ");
+  const age = risk.ageDays ?? 0;
+  const behind = majorsBehind(installed, risk.latestVersion);
+  const maint = risk.maintainers === undefined || risk.maintainers === 0 ? 3 : risk.maintainers === 1 ? 5 : 0;
+  return [
+    {
+      signal: "Known vulnerabilities",
+      value: risk.vulnerabilities.length ? `${risk.vulnerabilities.length} (${severities})` : "none",
+      points: Math.min(
+        50,
+        risk.vulnerabilities.reduce((sum, v) => sum + (SEVERITY_POINTS[v.severity] ?? 6), 0),
+      ),
+    },
+    {
+      signal: "Deprecated on the registry",
+      value: risk.deprecated ? "yes" : "no",
+      points: risk.deprecated ? 25 : 0,
+    },
+    {
+      signal: "Latest release age",
+      value: risk.ageDays === undefined ? "unknown" : `${risk.ageDays} days`,
+      points: age > 1095 ? 15 : age > 730 ? 10 : age > 365 ? 5 : 0,
+    },
+    {
+      signal: "Maintainers",
+      value: risk.maintainers === undefined ? "unknown" : String(risk.maintainers),
+      points: maint,
+    },
+    {
+      signal: "Major versions behind",
+      value: `${behind} (installed ${installed ?? "?"}, latest ${risk.latestVersion ?? "?"})`,
+      points: Math.min(10, 5 * behind),
+    },
+    {
+      signal: "Transitive packages",
+      value: String(risk.transitiveCount),
+      points: Math.round(Math.min(10, risk.transitiveCount / 10) * 10) / 10,
+    },
+  ];
+}
+
 /** Deterministic risk score; mirrors skills/dependency-risk-rank/references/scoring.md. */
 export function riskScore(risk: RiskIndicators, installed?: string): number {
-  const vulnPoints = Math.min(
-    50,
-    risk.vulnerabilities.reduce((sum, v) => sum + (SEVERITY_POINTS[v.severity] ?? 6), 0),
-  );
-  const deprecated = risk.deprecated ? 25 : 0;
-  const age = risk.ageDays ?? 0;
-  const agePoints = age > 1095 ? 15 : age > 730 ? 10 : age > 365 ? 5 : 0;
-  const maint = risk.maintainers === undefined || risk.maintainers === 0 ? 3 : risk.maintainers === 1 ? 5 : 0;
-  const majors = Math.min(10, 5 * majorsBehind(installed, risk.latestVersion));
-  const transitive = Math.min(10, risk.transitiveCount / 10);
-  return Math.min(
-    100,
-    Math.round((vulnPoints + deprecated + agePoints + maint + majors + transitive) * 10) / 10,
-  );
+  const total = riskBreakdown(risk, installed).reduce((sum, c) => sum + c.points, 0);
+  return Math.min(100, Math.round(total * 10) / 10);
 }
 
 interface DetectOutput extends Partial<Toolchain> {

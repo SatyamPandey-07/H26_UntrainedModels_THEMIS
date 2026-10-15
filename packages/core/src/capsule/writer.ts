@@ -10,6 +10,8 @@ import type { Findings, MigrationPlan, MigrationResult, Verification } from "../
 import { readSkillFile } from "../skills/loader.js";
 import { changedFiles } from "../tools/git.js";
 import { slugify } from "../util/misc.js";
+import { riskBreakdown } from "../agents/scout.js";
+import { recommendDependency } from "../recommend.js";
 import { gateClaims } from "./gate.js";
 
 export interface CapsuleInput {
@@ -239,27 +241,76 @@ export async function writeCapsule(ctx: RunContext, input: CapsuleInput): Promis
     : "Black-box probes were not run for this repository.";
   const gapClaims = [...bySection("gaps"), ...bySection("unresolved")];
 
-  let prBody = fill(readSkillFile("pr-report", "assets/pr-body.md"), {
+  // Why this dependency: the score broken into its parts, the blast radius, and why it was chosen.
+  const breakdown = depFinding ? riskBreakdown(depFinding.risk, depFinding.currentVersion) : [];
+  const recommended = findings ? recommendDependency(findings) : undefined;
+  const riskyCount =
+    findings?.dependencies.filter((d) => d.risk.vulnerabilities.length > 0 || d.risk.deprecated).length ?? 0;
+  const why = depFinding
+    ? [
+        "| Signal | Value | Points |",
+        "|---|---|---:|",
+        ...breakdown.map((c) => `| ${c.signal} | ${escapeCell(c.value)} | ${c.points} |`),
+        `| **Risk score** | | **${depFinding.score} / 100** |`,
+        "",
+        depFinding.importingFiles !== undefined
+          ? `Blast radius: imported in ${depFinding.importingFiles} source file${depFinding.importingFiles === 1 ? "" : "s"}, ${capsule.summary.callSites} call site${capsule.summary.callSites === 1 ? "" : "s"}.`
+          : `Call sites: ${capsule.summary.callSites}.`,
+        recommended?.name === dependency
+          ? `Themis selected it: the most risk per affected file among ${riskyCount} dependencies with a known vulnerability or deprecation.`
+          : "Requested explicitly.",
+        depFinding.rationale ? `\n> ${depFinding.rationale}` : "",
+      ].join("\n")
+    : "Risk data was not available for this dependency.";
+
+  const commitsTable = migration?.commits.length
+    ? [
+        "| Commit | Agent | Change |",
+        "|---|---|---|",
+        ...migration.commits.map(
+          (c) => `| \`${c.sha.slice(0, 7)}\` | Hephaestus | ${escapeCell(c.message)} |`,
+        ),
+        "| (capsule) | Clio | docs(themis): add Dependency Exit Capsule |",
+      ].join("\n")
+    : "No commits.";
+  const change = plan
+    ? plan.strategy === "replace"
+      ? `Replace \`${dependency}\` ${capsule.dependency.from} with \`${plan.target.name}\` ${plan.target.version}`
+      : `Upgrade \`${dependency}\` ${capsule.dependency.from} → ${plan.target.version}`
+    : `\`${dependency}\``;
+  const runUrl = process.env.THEMIS_RUN_URL;
+
+  const template = readSkillFile("pr-report", "assets/pr-body.md");
+  const values = {
     verdict,
     confidence: capsule.confidence,
     dependency,
-    from: capsule.dependency.from,
-    to: capsule.dependency.to ?? "n/a",
+    change,
     filesChanged: String(files.length),
     covered: String(capsule.summary.callSitesCovered),
     callSites: String(capsule.summary.callSites),
-    score: String(depFinding?.score ?? "n/a"),
+    run: runUrl ? `[${ctx.runId}](${runUrl})` : `\`${ctx.runId}\``,
+    why,
+    commits: commitsTable,
+    results: resultsTable(verification),
+    gaps: claimLines(gapClaims),
+    usageCount: String(usage.length),
     usageMap,
     rules,
     rationale,
-    results: resultsTable(verification),
     lintSecurity,
     probes,
-    gaps: claimLines(gapClaims),
     capsulePath: capsuleRepoPath(dependency),
-  });
-  if (prBody.length > MAX_PR_BODY)
-    prBody = `${prBody.slice(0, MAX_PR_BODY)}\n\n_Truncated; see the full capsule._`;
+  };
+  // The full capsule goes last and is the first thing trimmed if the body would exceed GitHub's limit.
+  const withoutCapsule = fill(template, { ...values, capsule: "" });
+  const room = MAX_PR_BODY - withoutCapsule.length - 200;
+  const capsuleForPr =
+    capsuleMd.length <= room
+      ? capsuleMd
+      : `${capsuleMd.slice(0, Math.max(0, room))}\n\n_Truncated here; the full capsule is committed at \`${capsuleRepoPath(dependency)}\`._`;
+  let prBody = fill(template, { ...values, capsule: capsuleForPr });
+  if (prBody.length > MAX_PR_BODY) prBody = `${prBody.slice(0, MAX_PR_BODY)}\n\n_Truncated._`;
 
   const uncoveredSites = new Set((verification?.coverage.uncovered ?? []).map((u) => u.split(" ")[0]));
   const annotations: CheckRunOutput["annotations"] = usage
