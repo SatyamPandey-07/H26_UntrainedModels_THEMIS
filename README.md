@@ -1,5 +1,9 @@
 # Themis
 
+<p align="center">
+  <img src="public/brag_themis.gif" alt="Themis Demo" width="600">
+</p>
+
 Dependency migration harness for npm projects: ranks risky dependencies, migrates one on its own branch, verifies it in a sandbox, and reports every claim with its evidence.
 
 ![Node.js](https://img.shields.io/badge/Node.js-%3E%3D22-5FA04E?style=flat-square&logo=nodedotjs&logoColor=white)
